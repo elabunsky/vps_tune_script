@@ -27,6 +27,8 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 SWAPPINESS=100                    # eager offload of cold pages into (z)ram
 PAGE_CLUSTER=0                    # swap one page at a time (best for zram)
+ZRAM_SIZE_MB=900                  # zram disksize in MiB (same as the fn box)
+                                  # only created when no zram/swap exists
 
 CONNTRACK_MAX=65536               # conntrack table slots
 CONNTRACK_HASHSIZE=16384          # = MAX / 4 (avg hash chain length)
@@ -103,8 +105,67 @@ info "Prerequisites"
 mkdir -p "$SYSCTL_D" "$MODPROBE_D"
 
 # -----------------------------------------------------------------------------
-info "1. Swap / zram behaviour"
+info "1. Swap / zram: bootstrap zram if missing, then tune behaviour"
 # -----------------------------------------------------------------------------
+ZRAM_SCRIPT="/usr/local/sbin/zram-setup.sh"
+ZRAM_UNIT="/etc/systemd/system/zram-setup.service"
+
+if [[ -e /sys/block/zram0 ]]; then
+    ok "zram0 already present ($(zramctl --output DISKSIZE --noheadings /dev/zram0 2>/dev/null | tr -d ' ') bytes) — bootstrap skipped"
+else
+    ZRAM_MB=$ZRAM_SIZE_MB
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "    DRY-RUN  : would create zram0 (${ZRAM_MB} MB, lz4, prio 100) + persist via systemd"
+    else
+        cat > "$ZRAM_SCRIPT" <<'ZEOF'
+#!/usr/bin/env bash
+# Bootstrap zram swap (created by vps_tune.sh). Idempotent.
+set -eu
+swapon --show=NAME --noheadings 2>/dev/null | grep -q '^/dev/zram0$' && exit 0
+ZRAM_MB="$1"
+
+# Some kernel builds ship zram in linux-modules-extra (Ubuntu). Install it
+# best-effort when modprobe cannot find the module.
+if ! modprobe zram 2>/dev/null; then
+    if command -v apt-get >/dev/null 2>&1; then
+        KREL="$(uname -r)"
+        apt-get install -y "linux-modules-extra-${KREL}" >/dev/null 2>&1 || true
+        modprobe zram 2>/dev/null || true
+    fi
+fi
+[ -e /sys/block/zram0 ] || { echo "zram module unavailable"; exit 1; }
+echo lz4 > /sys/block/zram0/comp_algorithm 2>/dev/null || true
+echo $((ZRAM_MB * 1024 * 1024)) > /sys/block/zram0/disksize
+mkswap /dev/zram0
+swapon -p 100 /dev/zram0
+ZEOF
+        chmod +x "$ZRAM_SCRIPT"
+        cat > "$ZRAM_UNIT" <<UNIT
+[Unit]
+Description=Setup zram swap (created by vps_tune.sh)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=$ZRAM_SCRIPT $ZRAM_MB
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+        c systemctl daemon-reload
+        c systemctl enable --now "$ZRAM_UNIT"
+        # systemd may report failure while apt-get is still fetching the package
+        # in the background ExecStart — give it a moment, then re-check.
+        sleep 3
+        if [[ -e /sys/block/zram0 ]] && swapon --show=NAME --noheadings 2>/dev/null | grep -q '^/dev/zram0$'; then
+            ok "zram0 created: ${ZRAM_MB} MB, lz4, prio 100 (persisted via $ZRAM_UNIT)"
+        else
+            skip "zram0 did not come up — check: journalctl -u zram-setup.service"
+        fi
+    fi
+fi
+
 if swapon --show 2>/dev/null | grep -q .; then
     {
         echo "# swap/zram tuning"

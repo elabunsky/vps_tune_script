@@ -12,6 +12,8 @@
 ## Что настраивает
 
 ### 1. Своп / zram
+Скрипт проверяет наличие `/dev/zram0`: если его нет — устанавливает пакет модулей ядра (`linux-modules-extra`, при необходимости), создаёт zram-устройство **900 МБ, lz4, приоритет 100** (как на эталонном сервере) и сохраняет автозапуск через systemd-юнит `zram-setup.service`. Если zram уже есть — только тюнит поведение.
+
 | Параметр | Значение | Зачем |
 |---|---|---|
 | `vm.swappiness` | `100` | Раньше выгружать холодные страницы в сжатый zram (он быстрый), а не держать в дефицитной RAM |
@@ -89,6 +91,8 @@ Everything the script does is applied at runtime **and persisted into `/etc/sysc
 ## What it configures
 
 ### 1. Swap / zram
+The script checks whether `/dev/zram0` exists: if not, it installs the kernel modules package (`linux-modules-extra`, when needed), creates a **900 MB, lz4, priority 100** zram device (matching the reference server) and persists auto-start via the `zram-setup.service` systemd unit. If zram already exists, it only tunes the behaviour.
+
 | Parameter | Value | Why |
 |---|---|---|
 | `vm.swappiness` | `100` | Offload cold pages into compressed zram early (it is fast) instead of keeping them in scarce RAM |
