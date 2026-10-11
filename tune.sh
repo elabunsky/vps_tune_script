@@ -479,5 +479,5 @@ ok "Done. Persisted across reboots:
   $CONNTRACK_CONF   (conntrack)
   $NET_CONF         (tcp)
   $MODPROBE_CONF    (conntrack hashsize at module load)
-  $DNSMASQ_CONF     (dnsmasq cache, if --with-dnsmasq)
+  $DNSMASQ_CONF     (dnsmasq cache)
 To simulate boot-time application:  sysctl --system"

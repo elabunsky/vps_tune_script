@@ -46,15 +46,14 @@
 ### 4. Сниффинг xray
 Скрипт находит конфиги xray (x-ui и standalone) и убирает `fakedns` и `quic` из `sniffing.destOverride` у всех inbound. Эти протоколы в сниффинге ломают/замедляют проксирование реального трафика. Изменение требует рестарта xray: `sudo ./tune.sh --restart-xray` (или через панель x-ui).
 
-### 5. DNS-кэш (опционально, `--with-dnsmasq`)
-Ставит **dnsmasq** как системный резолвер вместо stub'а systemd-resolved. Кэш 10000 записей и `min-cache-ttl=3600` — записи держатся минимум час, даже если upstream-TTL короткий (у google ~300с). На боевом боксе это опустило `systemd-resolved` с 4.1% → 0.3% CPU и убрало шторм upstream-DNS (~98 запр/сек). Cutover безопасный: dnsmasq сначала поднимается и проверяется, и только потом переключается `/etc/resolv.conf`. Tailscale MagicDNS сохраняется через форвард `*.ts.net` → `100.100.100.100` (автодетект tailscale0).
+### 5. DNS-кэш
+Ставит **dnsmasq** как системный резолвер вместо stub'а systemd-resolved. Кэш 10000 записей и `min-cache-ttl=3600` — записи держатся минимум час, даже если upstream-TTL короткий (у google ~300с). На боевом боксе это опустило `systemd-resolved` с 4.1% → 0.3% CPU и убрало шторм upstream-DNS (~98 запр/сек). Cutover безопасный: dnsmasq сначала поднимается и проверяется, и только потом переключается `/etc/resolv.conf` (который дополнительно защищается `chattr +i` от перезаписи cloud-init'ом при будущих загрузках). Tailscale MagicDNS сохраняется через форвард `*.ts.net` → `100.100.100.100` (автодетект tailscale0).
 
 ## Использование
 
 ```bash
 cd ~/vps_tune_script
-sudo ./tune.sh                 # применить секции 1-4
-sudo ./tune.sh --with-dnsmasq  # дополнительно поставить dnsmasq-кэш (секция 5)
+sudo ./tune.sh                 # применить все секции (включая dnsmasq-кэш)
 sudo ./tune.sh --dry-run       # показать, что изменится, не меняя ничего
 sudo ./tune.sh --restart-xray  # после патча сниффинга — рестарт x-ui/xray
 ./stat.sh                      # сводка здоровья (без root, ничего не меняет)
@@ -132,15 +131,14 @@ The script checks whether `/dev/zram0` exists: if not, it installs the kernel mo
 ### 4. xray sniffing
 The script finds xray configs (x-ui and standalone) and removes `fakedns` and `quic` from `sniffing.destOverride` on all inbounds. Those protocols in sniffing break/slow down proxying of real traffic. The change needs an xray restart: `sudo ./tune.sh --restart-xray` (or via the x-ui panel).
 
-### 5. DNS cache (optional, `--with-dnsmasq`)
-Installs **dnsmasq** as the system resolver in place of the systemd-resolved stub. A 10000-entry cache with `min-cache-ttl=3600` keeps records for at least an hour even when the upstream TTL is short (google's is ~300s). On the production box this dropped `systemd-resolved` from 4.1% to 0.3% CPU and eliminated the upstream DNS storm (~98 q/s). The cutover is safe: dnsmasq is started and verified first, and only then is `/etc/resolv.conf` repointed. Tailscale MagicDNS is preserved by forwarding `*.ts.net` to `100.100.100.100` (tailscale0 is auto-detected).
+### 5. DNS cache
+Installs **dnsmasq** as the system resolver in place of the systemd-resolved stub. A 10000-entry cache with `min-cache-ttl=3600` keeps records for at least an hour even when the upstream TTL is short (google's is ~300s). On the production box this dropped `systemd-resolved` from 4.1% to 0.3% CPU and eliminated the upstream DNS storm (~98 q/s). The cutover is safe: dnsmasq is started and verified first, and only then is `/etc/resolv.conf` repointed (and additionally locked with `chattr +i` so cloud-init cannot rewrite it at later boots). Tailscale MagicDNS is preserved by forwarding `*.ts.net` to `100.100.100.100` (tailscale0 is auto-detected).
 
 ## Usage
 
 ```bash
 cd ~/vps_tune_script
-sudo ./tune.sh                 # apply sections 1-4
-sudo ./tune.sh --with-dnsmasq  # also install the dnsmasq cache (section 5)
+sudo ./tune.sh                 # apply everything (incl. dnsmasq cache)
 sudo ./tune.sh --dry-run       # show what would change without changing anything
 sudo ./tune.sh --restart-xray  # after the sniffing patch — restart x-ui/xray
 ./stat.sh                      # one-screen health report (read-only, no root)
