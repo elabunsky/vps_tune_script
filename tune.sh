@@ -11,13 +11,17 @@
 #                                  dropping packet" -> SSH/VPN connection freezes)
 #   3. TCP stack                 — buffers, keepalive, backlogs, TIME_WAIT
 #   4. xray sniffing             — remove fakeDns / QUIC from destOverride
+#   5. DNS cache (opt-in)        — dnsmasq as the system resolver with a big
+#                                  min-TTL cache, replacing systemd-resolved
+#                                  stub (cuts resolved CPU + upstream DNS storm)
 #
 # Idempotent — safe to re-run. Must be run as root.
 #
 # Usage:
-#   sudo ./tune.sh                # apply everything
-#   sudo ./tune.sh --dry-run      # show what would change, change nothing
-#   sudo ./tune.sh --restart-xray # after patching sniffing, restart x-ui/xray
+#   sudo ./tune.sh                 # apply sections 1-4
+#   sudo ./tune.sh --with-dnsmasq  # also install dnsmasq caching resolver (sec 5)
+#   sudo ./tune.sh --dry-run       # show what would change, change nothing
+#   sudo ./tune.sh --restart-xray  # after patching sniffing, restart x-ui/xray
 # =============================================================================
 
 set -euo pipefail
@@ -66,6 +70,17 @@ XRAY_CONFIGS=(
 XUI_DB="/etc/x-ui/x-ui.db"
 SNIFF_REMOVE=(fakedns quic)
 
+# --- DNS cache (dnsmasq) ------------------------------------------------------
+# Replaces systemd-resolved stub with a lightweight caching resolver.
+# min-cache-ttl inflates short upstream TTLs (e.g. google's 300s -> 1h),
+# killing the miss-storm that drove resolved to ~4% CPU on a busy VPN box.
+DNSMASQ_CONF="/etc/dnsmasq.d/vps-tune.conf"
+DNSMASQ_UPSTREAM=(1.1.1.1 8.8.8.8 2606:4700:4700::1111)
+DNSMASQ_CACHE_SIZE=10000
+DNSMASQ_MIN_TTL=3600
+# tailscale MagicDNS forwarder (empty -> autodetect from resolvectl)
+TS_MAGIC_DNS="100.100.100.100"
+
 # -----------------------------------------------------------------------------
 SYSCTL_D="/etc/sysctl.d"
 SWAP_CONF="$SYSCTL_D/99-swap.conf"
@@ -76,10 +91,12 @@ MODPROBE_CONF="$MODPROBE_D/nf_conntrack-hashsize.conf"
 
 DRY_RUN=0
 RESTART_XRAY=0
+WITH_DNSMASQ=0
 for a in "$@"; do
     case "$a" in
-        --dry-run)      DRY_RUN=1 ;;
-        --restart-xray) RESTART_XRAY=1 ;;
+        --dry-run)       DRY_RUN=1 ;;
+        --restart-xray)  RESTART_XRAY=1 ;;
+        --with-dnsmasq)  WITH_DNSMASQ=1 ;;
         *) echo "Unknown flag: $a"; exit 2 ;;
     esac
 done
@@ -362,7 +379,91 @@ if [[ "$RESTART_XRAY" -eq 1 ]]; then
 fi
 
 # -----------------------------------------------------------------------------
-info "5. Verification"
+info "5. DNS cache: dnsmasq as system resolver (opt-in, --with-dnsmasq)"
+# -----------------------------------------------------------------------------
+# Replaces systemd-resolved stub with dnsmasq: big cache + min-cache-ttl kills
+# the short-TTL miss-storm that drove resolved to ~4% CPU under proxy load.
+# Safe cutover: dnsmasq is started and *proven* before resolv.conf is touched.
+if [[ "$WITH_DNSMASQ" -eq 0 ]]; then
+    skip "dnsmasq section skipped (pass --with-dnsmasq to enable)"
+elif [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    DRY-RUN  : would install dnsmasq, configure cache (size=$DNSMASQ_CACHE_SIZE, min-ttl=$DNSMASQ_MIN_TTL),"
+    echo "    DRY-RUN  : disable resolved stub, repoint /etc/resolv.conf -> 127.0.0.1"
+else
+    if grep -q '^nameserver 127.0.0.1$' /etc/resolv.conf 2>/dev/null && systemctl is-active --quiet dnsmasq 2>/dev/null; then
+        ok "dnsmasq already the system resolver — nothing to do"
+    else
+        # 5a. install — the full package brings the systemd unit; dnsmasq-base
+        # (binary only) is not enough.
+        if ! systemctl cat dnsmasq >/dev/null 2>&1; then
+            if command -v apt-get >/dev/null 2>&1; then
+                c bash -c 'DEBIAN_FRONTEND=noninteractive apt-get install -y dnsmasq >/dev/null 2>&1'
+            else
+                skip "dnsmasq service not installed and no apt-get — install manually"
+                WITH_DNSMASQ=0
+            fi
+        fi
+        if [[ "$WITH_DNSMASQ" -eq 1 ]]; then
+            systemctl stop dnsmasq 2>/dev/null || true
+            # 5b. build tailscale forward lines (MagicDNS) if tailscale0 exists
+            TS_LINES=""
+            if ip link show tailscale0 >/dev/null 2>&1; then
+                TS_LINES="$TS_LINES
+server=/ts.net/${TS_MAGIC_DNS}
+server=/100.in-addr.arpa/${TS_MAGIC_DNS}
+server=/0.e.1.a.c.5.1.1.a.7.d.f.ip6.arpa/${TS_MAGIC_DNS}"
+            fi
+            # 5c. config
+            {
+                echo "# vps_tune: caching resolver, replaces systemd-resolved stub"
+                echo "listen-address=127.0.0.1"
+                echo "bind-interfaces"
+                echo "no-resolv"
+                echo "domain-needed"
+                echo "bogus-priv"
+                echo "cache-size=${DNSMASQ_CACHE_SIZE}"
+                echo "min-cache-ttl=${DNSMASQ_MIN_TTL}"
+                echo "local-ttl=${DNSMASQ_MIN_TTL}"
+                for s in "${DNSMASQ_UPSTREAM[@]}"; do echo "server=$s"; done
+                echo -n "$TS_LINES"
+            } > "$DNSMASQ_CONF"
+            c systemctl daemon-reload
+            c systemctl enable dnsmasq
+            c systemctl start dnsmasq
+            sleep 1
+            # 5d. PROVE dnsmasq works BEFORE touching the system resolver
+            if dig +short +time=3 +tries=1 @127.0.0.1 www.google.com | grep -qE '^[0-9]'; then
+                ok "dnsmasq resolves correctly on 127.0.0.1 — cutting over"
+                # 5e. disable resolved stub listener (frees 127.0.0.53, stops managing resolv.conf)
+                if ! grep -q '^DNSStubListener=' /etc/systemd/resolved.conf 2>/dev/null; then
+                    echo "DNSStubListener=no" >> /etc/systemd/resolved.conf
+                else
+                    c sed -i 's/^DNSStubListener=.*/DNSStubListener=no/' /etc/systemd/resolved.conf
+                fi
+                c systemctl restart systemd-resolved
+                # 5f. static resolv.conf (regular file, not symlink — resolved won't rewrite it)
+                SEARCH_LINE=""
+                ts_dom=$( { resolvectl domain tailscale0 2>/dev/null || true; } | awk '{print $3}' | head -1)
+                [[ -n "$ts_dom" ]] && SEARCH_LINE="search ${ts_dom}"
+                cp -a /etc/resolv.conf "/etc/resolv.conf.bak.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+                c bash -c "rm -f /etc/resolv.conf && printf 'nameserver 127.0.0.1\noptions edns0 trust-ad\n${SEARCH_LINE}\n' > /etc/resolv.conf"
+                ok "/etc/resolv.conf -> 127.0.0.1 (dnsmasq), resolved stub disabled"
+                # 5g. final verify through the system resolver
+                if dig +short +time=3 +tries=1 www.google.com | grep -qE '^[0-9]'; then
+                    ok "system resolver verified: www.google.com resolves via dnsmasq"
+                else
+                    skip "post-cutover verify failed — check: dig @127.0.0.1 www.google.com ; journalctl -u dnsmasq"
+                fi
+            else
+                skip "dnsmasq did not resolve www.google.com — aborting cutover (resolved left intact)"
+                systemctl stop dnsmasq 2>/dev/null || true
+            fi
+        fi
+    fi
+fi
+
+# -----------------------------------------------------------------------------
+info "6. Verification"
 # -----------------------------------------------------------------------------
 [[ "$DRY_RUN" -eq 1 ]] && { echo; echo "Dry-run finished — nothing was changed."; exit 0; }
 
@@ -382,4 +483,5 @@ ok "Done. Persisted across reboots:
   $CONNTRACK_CONF   (conntrack)
   $NET_CONF         (tcp)
   $MODPROBE_CONF    (conntrack hashsize at module load)
+  $DNSMASQ_CONF     (dnsmasq cache, if --with-dnsmasq)
 To simulate boot-time application:  sysctl --system"
