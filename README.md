@@ -53,9 +53,12 @@ cd ~/vps_tune_script
 sudo ./tune.sh                 # применить всё
 sudo ./tune.sh --dry-run       # показать, что изменится, не меняя ничего
 sudo ./tune.sh --restart-xray  # после патча сниффинга — рестарт x-ui/xray
+./stat.sh                      # сводка здоровья (без root, ничего не меняет)
 ```
 
 ## Как проверять результат
+
+`./stat.sh` показывает всё необходимое одной панелью: RAM, своп/zram со сжатием, zram-трафик, conntrack (заполненность + дропы `table full`), PSI и топ процессов. Для справки те же проверки вручную:
 
 ```bash
 sysctl vm.swappiness vm.page-cluster net.netfilter.nf_conntrack_max
@@ -132,10 +135,12 @@ cd ~/vps_tune_script
 sudo ./tune.sh                 # apply everything
 sudo ./tune.sh --dry-run       # show what would change without changing anything
 sudo ./tune.sh --restart-xray  # after the sniffing patch — restart x-ui/xray
+./stat.sh                      # one-screen health report (no root, read-only)
 ```
 
 ## Verifying the result
 
+`./stat.sh` renders everything that matters on one screen: RAM, swap/zram with compression, zram traffic, conntrack (fill level + `table full` drops), PSI and top processes. For reference, the same checks by hand:
 ```bash
 sysctl vm.swappiness vm.page-cluster net.netfilter.nf_conntrack_max
 cat /proc/sys/net/netfilter/nf_conntrack_count   # current fill level
@@ -158,6 +163,7 @@ ss -s                                            # socket state
 
 ```
 vps_tune_script/
-├── tune.sh    # main script (run as root)
+├── tune.sh    # main tuning script (run as root)
+├── stat.sh    # one-screen health report (read-only, no root needed)
 └── README.md  # this documentation
 ```
