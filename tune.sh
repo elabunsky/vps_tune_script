@@ -14,6 +14,7 @@
 #   5. DNS cache                 — dnsmasq as the system resolver with a big
 #                                  min-TTL cache, replacing systemd-resolved
 #                                  stub (cuts resolved CPU + upstream DNS storm)
+#   6. Nginx FD limits           — systemd + workers, validated with rollback
 #
 # Idempotent — safe to re-run. Must be run as root.
 #
@@ -21,6 +22,8 @@
 #   sudo ./tune.sh                 # apply everything
 #   sudo ./tune.sh --dry-run       # show what would change, change nothing
 #   sudo ./tune.sh --restart-xray  # after patching sniffing, restart x-ui/xray
+#   sudo ./tune.sh --nginx-only    # only nginx, no DNS/VPN/system tuning
+#   sudo ./tune.sh --nginx-only --restart-nginx  # also apply master limits now
 # =============================================================================
 
 set -euo pipefail
@@ -40,7 +43,7 @@ CONNTRACK_EST_TIMEOUT=86400       # established-entry timeout, seconds (1 day)
 # --- TCP stack ---------------------------------------------------------------
 # Values proven on the production box (fn): 16 MB buffers + BBR/fq (hwdsl2 VPN
 # script heritage) — long VPN tunnels stall on smaller caps.
-TCP_FIN_TIMEOUT=20                # TIME_WAIT frees port slots faster
+TCP_FIN_TIMEOUT=20                # timeout for orphaned FIN_WAIT_2 sockets
 TCP_TW_REUSE=1                    # reuse sockets in TIME_WAIT for new conns
 TCP_MAX_SYN_BACKLOG=8192          # room for pending SYN requests (conn bursts)
 CORE_SOMAXCONN=4096               # accept-queue depth (nginx/xray)
@@ -88,12 +91,21 @@ CONNTRACK_CONF="$SYSCTL_D/99-conntrack.conf"
 MODPROBE_D="/etc/modprobe.d"
 MODPROBE_CONF="$MODPROBE_D/nf_conntrack-hashsize.conf"
 
+# Nginx defaults: per-worker connections, with room for non-socket descriptors.
+# Existing larger numeric limits are preserved; fs.nr_open is never changed.
+NGINX_NOFILE=262144
+NGINX_WORKER_CONNECTIONS=32768
+
 DRY_RUN=0
 RESTART_XRAY=0
+NGINX_ONLY=0
+RESTART_NGINX=0
 for a in "$@"; do
     case "$a" in
         --dry-run)       DRY_RUN=1 ;;
         --restart-xray)  RESTART_XRAY=1 ;;
+        --nginx-only)    NGINX_ONLY=1 ;;
+        --restart-nginx) RESTART_NGINX=1 ;;
         *) echo "Unknown flag: $a"; exit 2 ;;
     esac
 done
@@ -112,11 +124,369 @@ ok()   { echo -e "  \033[1;32mOK\033[0m $*"; }
 skip() { echo -e "  \033[1;33mSKIP\033[0m $*"; }
 
 # -----------------------------------------------------------------------------
+# Nginx transaction is embedded to keep tune.sh usable as a standalone script.
+# Only the conventional nginx.service + compiled default config are supported.
+# -----------------------------------------------------------------------------
+tune_nginx() {
+    info "Nginx: file descriptors + worker connections"
+    if ! command -v nginx >/dev/null 2>&1; then
+        skip "nginx not installed — nothing to tune"
+        return
+    fi
+    if ! command -v python3 >/dev/null 2>&1 || ! command -v systemctl >/dev/null 2>&1; then
+        echo "ERROR: nginx tuning requires python3 and systemd" >&2
+        return 1
+    fi
+    python3 - "$DRY_RUN" "$RESTART_NGINX" "$NGINX_NOFILE" "$NGINX_WORKER_CONNECTIONS" <<'NGINX_PY'
+import fcntl
+import glob
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+SERVICE = "nginx.service"
+DROPIN = Path("/etc/systemd/system/nginx.service.d/zz-vps-tune-nofile.conf")
+BACKUPS = Path("/var/backups/vps-tune/nginx")
+LOCK = Path("/run/lock/vps-tune-nginx.lock")
+NR_OPEN = Path("/proc/sys/fs/nr_open")
+
+
+def run(*args):
+    return subprocess.run(args, check=True, text=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE).stdout.strip()
+
+
+def prop(name):
+    return run("systemctl", "show", SERVICE, "--value", "-p", name)
+
+
+def tokens(text):
+    # Keep offsets: edit directive values only, preserving comments and layout.
+    pattern = r'''\s+|\#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[{};]|(?:\\.|\$\{[^}]*\}|\$(?!\{)|[^\s{};"'\\$])+'''
+    result, pos = [], 0
+    for match in re.finditer(pattern, text):
+        if match.start() != pos:
+            raise ValueError("unsupported nginx syntax")
+        pos = match.end()
+        word = match.group()
+        if not word.isspace() and not word.startswith("#"):
+            result.append((word, match.start(), match.end()))
+    if pos != len(text):
+        raise ValueError("unsupported nginx syntax")
+    return result
+
+
+def plan_config(config, nofile, connections):
+    texts, found, events, visiting = {}, {}, [], set()
+    prefix = config.parent
+
+    def parse(path, context=()):
+        path = path.resolve(strict=True)
+        if path in visiting:
+            raise ValueError("recursive nginx include")
+        visiting.add(path)
+        text = texts.setdefault(path, path.read_text())
+        ts = tokens(text)
+        scope, statement = list(context), []
+        for token in ts:
+            word = token[0]
+            if word == "{":
+                if not statement:
+                    raise ValueError("unexpected nginx block")
+                name = statement[0][0]
+                if not scope and name == "events":
+                    events.append((path, token[2]))
+                scope.append(name)
+                statement = []
+            elif word == "}":
+                if statement or len(scope) <= len(context):
+                    raise ValueError("unbalanced nginx block")
+                scope.pop()
+            elif word == ";":
+                if not statement:
+                    raise ValueError("empty nginx directive")
+                name = statement[0][0]
+                relevant = (not scope and name == "worker_rlimit_nofile") or (
+                    scope == ["events"] and name == "worker_connections")
+                if relevant:
+                    if name in found or len(statement) != 2:
+                        raise ValueError("duplicate or unsupported " + name)
+                    value = statement[1]
+                    if not re.fullmatch(r"[1-9][0-9]*", value[0]):
+                        raise ValueError("non-numeric " + name)
+                    found[name] = (path, value)
+                if name == "include" and scope in ([], ["events"]):
+                    if len(statement) != 2:
+                        raise ValueError("unsupported include")
+                    include = shlex.split(statement[1][0])[0]
+                    include = str(prefix / include) if not os.path.isabs(include) else include
+                    matches = sorted(glob.glob(include))
+                    if not matches and not glob.has_magic(include):
+                        raise ValueError("missing include: " + include)
+                    for child in matches:
+                        parse(Path(child), tuple(scope))
+                statement = []
+            else:
+                statement.append(token)
+        if statement or scope != list(context):
+            raise ValueError("unbalanced nginx configuration")
+        visiting.remove(path)
+
+    parse(config)
+    if len(events) != 1:
+        raise ValueError("exactly one main events block is required")
+    connections = max(connections, int(found.get("worker_connections", (None, ("0",)))[1][0]))
+    # Headroom for logs, listeners, cached files and other non-connection FDs.
+    nofile = max(nofile, connections + 1024,
+                 int(found.get("worker_rlimit_nofile", (None, ("0",)))[1][0]))
+    edits = {}
+    for name, value in (("worker_rlimit_nofile", nofile), ("worker_connections", connections)):
+        if name in found:
+            path, token = found[name]
+            edits.setdefault(path, []).append((token[1], token[2], str(value)))
+        elif name == "worker_rlimit_nofile":
+            # Before any include, in main context (conf.d is usually http context).
+            edits.setdefault(config.resolve(), []).append((0, 0, f"{name} {value};\n"))
+        else:
+            path, offset = events[0]
+            edits.setdefault(path, []).append((offset, offset, f"\n    {name} {value};\n"))
+    changes = {}
+    for path, replacements in edits.items():
+        updated = texts[path]
+        for start, end, value in sorted(replacements, reverse=True):
+            updated = updated[:start] + value + updated[end:]
+        if updated != texts[path]:
+            changes[path] = updated
+    return changes, nofile, connections
+
+
+def replace(path, content):
+    # Atomic replacement on the same filesystem; preserve owner/mode/metadata.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".vps-tune-", dir=path.parent)
+    os.close(fd)
+    try:
+        if path.exists():
+            shutil.copy2(path, tmp)
+            st = path.stat()
+            os.chown(tmp, st.st_uid, st.st_gid)
+        else:
+            os.chmod(tmp, 0o644)
+        Path(tmp).write_bytes(content if isinstance(content, bytes) else content.encode())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def process_limits(pid):
+    for line in Path(f"/proc/{pid}/limits").read_text().splitlines():
+        if line.startswith("Max open files"):
+            return [int(v) if v.isdigit() else float("inf") for v in line.split()[3:5]]
+    raise ValueError("cannot read process RLIMIT_NOFILE")
+
+
+def worker_pids(pid):
+    children = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+    workers = []
+    for child in children:
+        title = Path(f"/proc/{child}/cmdline").read_text()
+        if "nginx: worker process" in title and "shutting down" not in title:
+            workers.append(child)
+    return workers
+
+
+def verify_workers(nofile, previous=()):
+    # Reload is asynchronous. Ignore old workers draining existing connections.
+    for _ in range(30):
+        pid = int(prop("MainPID"))
+        try:
+            workers = worker_pids(pid)
+            if (workers and (not previous or set(workers) - set(previous)) and
+                    all(min(process_limits(p)) >= nofile for p in workers)):
+                return
+        except FileNotFoundError:
+            pass  # worker exited while reading /proc
+        time.sleep(0.2)
+    raise RuntimeError("new nginx workers did not acquire the requested FD limit")
+
+
+def apply(changes, config, nofile, service_limit, dry_run, restart):
+    active = prop("ActiveState") == "active"
+    needs_restart = active and min(process_limits(int(prop("MainPID")))) < service_limit
+    needs_reload = False
+    if active:
+        try:
+            workers = worker_pids(int(prop("MainPID")))
+            needs_reload = not workers or any(min(process_limits(p)) < nofile for p in workers)
+        except FileNotFoundError:
+            needs_reload = True
+    print(f"Nginx: worker_rlimit_nofile={nofile}, LimitNOFILE={service_limit}")
+    if dry_run:
+        for path in changes:
+            print(f"DRY-RUN: would back up and update {path}")
+        print("DRY-RUN: nginx -t, daemon-reload, " +
+              ("restart" if restart and needs_restart else "reload if config changed"))
+        return
+    if not changes and not needs_reload and not (restart and needs_restart):
+        print("Nginx: files already match; no reload/restart needed")
+    else:
+        backup = None
+        originals = {}
+        action_attempted = False
+        try:
+            if changes:
+                BACKUPS.mkdir(parents=True, exist_ok=True, mode=0o700)
+                backup = Path(tempfile.mkdtemp(prefix=time.strftime("%Y%m%d-%H%M%S-"), dir=BACKUPS))
+                for i, path in enumerate(changes):
+                    saved = backup / str(i) if path.exists() else None
+                    if saved is not None:
+                        shutil.copy2(path, saved)
+                        st = path.stat()
+                        os.chown(saved, st.st_uid, st.st_gid)
+                    originals[path] = saved
+                (backup / "manifest.json").write_text(json.dumps(
+                    {str(p): str(s) if s else None for p, s in originals.items()}, indent=2))
+                print(f"Nginx backup: {backup}")
+                for path, content in changes.items():
+                    replace(path, content)
+            run("nginx", "-t", "-c", str(config))
+            run("systemctl", "daemon-reload")
+            if min(int(prop("LimitNOFILESoft")), int(prop("LimitNOFILE"))) < service_limit:
+                raise RuntimeError("another systemd drop-in overrides LimitNOFILE")
+            if active:
+                previous = worker_pids(int(prop("MainPID")))
+                if restart and needs_restart:
+                    action_attempted = True
+                    run("systemctl", "restart", SERVICE)
+                elif needs_reload or any(path != DROPIN for path in changes):
+                    action_attempted = True
+                    run("systemctl", "reload", SERVICE)
+                verify_workers(nofile, previous if action_attempted else ())
+                if prop("ActiveState") != "active":
+                    raise RuntimeError("nginx is no longer active")
+                if restart and min(process_limits(int(prop("MainPID")))) < service_limit:
+                    raise RuntimeError("nginx master did not acquire LimitNOFILE")
+        except BaseException:
+            errors = []
+            for path, saved in originals.items():
+                try:
+                    if saved is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        replace(path, saved.read_bytes())
+                        shutil.copystat(saved, path)
+                except Exception as exc:
+                    errors.append(str(exc))
+            try:
+                run("systemctl", "daemon-reload")
+                run("nginx", "-t", "-c", str(config))
+                if active and action_attempted:
+                    # A failed restart may have stopped the old master.
+                    action = "reload" if prop("ActiveState") == "active" else "start"
+                    run("systemctl", action, SERVICE)
+                    if prop("ActiveState") != "active":
+                        raise RuntimeError("nginx recovery did not become active")
+            except Exception as exc:
+                errors.append(str(exc))
+            print("ERROR: nginx transaction rolled back" + (f"; backup: {backup}" if backup else ""), file=sys.stderr)
+            if errors:
+                print("ERROR: rollback needs manual recovery: " + "; ".join(errors), file=sys.stderr)
+            raise
+    if not active:
+        print("Nginx is stopped; files are ready for the next start (left stopped).")
+    elif min(process_limits(int(prop("MainPID")))) < service_limit:
+        print("Nginx master keeps its old limits until restart. Workers use worker_rlimit_nofile.")
+        print("Run: sudo ./tune.sh --nginx-only --restart-nginx (briefly interrupts connections).")
+
+
+def main():
+    dry_run, restart = map(int, sys.argv[1:3])
+    nofile, connections = map(int, sys.argv[3:5])
+    if nofile <= 0 or connections <= 0:
+        raise ValueError("nginx targets must be positive integers")
+    # Do not silently tune a different config than the service actually runs.
+    command = prop("ExecStart")
+    binary = re.search(r"path=([^ ;]+)", command)
+    if not binary or Path(binary.group(1)).resolve() != Path(shutil.which("nginx")).resolve():
+        raise ValueError("nginx.service uses a different binary or a wrapper")
+    if not prop("FragmentPath") or prop("User") not in ("", "root"):
+        raise ValueError("a system nginx.service running a root master is required")
+    if re.search(r"(?:\s)-(?:c|p)\S*", command) or any(
+            value in command for value in ("worker_rlimit_nofile", "master_process off", "daemon off")):
+        raise ValueError("custom nginx -c/-p/-g limits need manual configuration")
+    version = subprocess.run(
+        ["nginx", "-V"], check=True, text=True, capture_output=True).stderr
+    match = re.search(r"--conf-path=(\S+)", version)
+    config = Path(match.group(1) if match else "/etc/nginx/nginx.conf")
+    if not config.is_absolute() or not config.is_file():
+        raise ValueError("nginx needs an existing absolute default config path")
+    run("nginx", "-t", "-c", str(config))  # require a valid baseline
+    changes, nofile, connections = plan_config(config, nofile, connections)
+    nr_open = int(NR_OPEN.read_text())
+    if nofile > nr_open:
+        raise ValueError(f"required nofile={nofile} exceeds fs.nr_open={nr_open}; kernel left unchanged")
+    soft, hard = prop("LimitNOFILESoft"), prop("LimitNOFILE")
+    if not soft.isdigit() or not hard.isdigit():
+        raise ValueError("non-numeric/infinite systemd limits require manual review")
+    # Preserve an existing larger hard or soft service limit.
+    service_limit = max(nofile, int(soft), int(hard))
+    if service_limit > nr_open:
+        raise ValueError("existing systemd limit exceeds fs.nr_open; kernel left unchanged")
+    if DROPIN.is_symlink():
+        raise ValueError("managed systemd drop-in must not be a symlink")
+    desired = f"# Managed by vps_tune_script/tune.sh\n[Service]\nLimitNOFILE={service_limit}\n"
+    if not DROPIN.exists() or DROPIN.read_text() != desired:
+        changes[DROPIN] = desired
+    print(f"Nginx: worker_connections={connections}; fs.nr_open={nr_open}")
+    apply(changes, config, nofile, service_limit, dry_run, restart)
+
+
+if __name__ == "__main__":
+    try:
+        # Dry-run creates no lock, backup, temporary or configuration files.
+        if int(sys.argv[1]):
+            main()
+        else:
+            fd = os.open(LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "a") as lock:
+                lock_stat = os.fstat(lock.fileno())
+                if lock_stat.st_uid != os.geteuid() or not stat.S_ISREG(lock_stat.st_mode):
+                    raise ValueError("unsafe nginx tuning lock file")
+                os.fchmod(lock.fileno(), 0o600)
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                def interrupted(signum, frame):
+                    raise RuntimeError(f"interrupted by signal {signum}")
+                signal.signal(signal.SIGTERM, interrupted)
+                signal.signal(signal.SIGHUP, interrupted)
+                main()
+    except (Exception, KeyboardInterrupt) as exc:
+        print(f"ERROR: nginx tuning failed: {exc}", file=sys.stderr)
+        if isinstance(exc, subprocess.CalledProcessError):
+            print(exc.stderr, file=sys.stderr)
+        sys.exit(1)
+NGINX_PY
+}
+
+# -----------------------------------------------------------------------------
 info "Prerequisites"
 # -----------------------------------------------------------------------------
 [[ $EUID -eq 0 ]] || { echo "ERROR: run as root (sudo ./tune.sh)"; exit 1; }
+if [[ "$NGINX_ONLY" -eq 1 ]]; then
+    tune_nginx
+    exit 0
+fi
 [[ -d $SYSCTL_D ]] || { echo "ERROR: $SYSCTL_D missing"; exit 1; }
-mkdir -p "$SYSCTL_D" "$MODPROBE_D"
+c mkdir -p "$SYSCTL_D" "$MODPROBE_D"
 
 # -----------------------------------------------------------------------------
 info "1. Swap / zram: bootstrap zram if missing, then tune behaviour"
@@ -181,11 +551,13 @@ UNIT
 fi
 
 if swapon --show 2>/dev/null | grep -q .; then
-    {
-        echo "# swap/zram tuning"
-        grep -q "^vm.swappiness=" "$SWAP_CONF" 2>/dev/null || echo "vm.swappiness=$SWAPPINESS"
-        grep -q "^vm.page-cluster=" "$SWAP_CONF" 2>/dev/null || echo "vm.page-cluster=$PAGE_CLUSTER"
-    } > /tmp/swap.conf.new
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        {
+            echo "# swap/zram tuning"
+            grep -q "^vm.swappiness=" "$SWAP_CONF" 2>/dev/null || echo "vm.swappiness=$SWAPPINESS"
+            grep -q "^vm.page-cluster=" "$SWAP_CONF" 2>/dev/null || echo "vm.page-cluster=$PAGE_CLUSTER"
+        } > /tmp/swap.conf.new
+    fi
     if [[ -f "$SWAP_CONF" ]]; then
         c sed -i "s|^vm.swappiness=.*|vm.swappiness=$SWAPPINESS|; s|^vm.page-cluster=.*|vm.page-cluster=$PAGE_CLUSTER|" "$SWAP_CONF"
         c rm -f /tmp/swap.conf.new
@@ -200,7 +572,10 @@ fi
 # -----------------------------------------------------------------------------
 info "2. conntrack: capacity + timeout"
 # -----------------------------------------------------------------------------
-# hashsize is a module parameter -> must survive reboot via modprobe.d
+# hashsize is a module parameter -> must survive reboot via modprobe.d.
+# Preserve an existing larger table's hash rather than shrinking it on rerun.
+CUR_HASHSIZE=$(cat /sys/module/nf_conntrack/parameters/hashsize 2>/dev/null || echo 0)
+[[ "$CUR_HASHSIZE" -gt "$CONNTRACK_HASHSIZE" ]] && CONNTRACK_HASHSIZE=$CUR_HASHSIZE
 if ! grep -q "^options nf_conntrack hashsize=$CONNTRACK_HASHSIZE\$" "$MODPROBE_CONF" 2>/dev/null; then
     c bash -c "echo 'options nf_conntrack hashsize=$CONNTRACK_HASHSIZE' > '$MODPROBE_CONF'"
 else
@@ -215,18 +590,20 @@ else
     skip "nf_conntrack not loaded yet — will pick hashsize from modprobe.d at boot"
 fi
 
-{
-    echo "# conntrack capacity & timeout"
-    echo "net.netfilter.nf_conntrack_max = $CONNTRACK_MAX"
-    echo "net.netfilter.nf_conntrack_tcp_timeout_established = $CONNTRACK_EST_TIMEOUT"
-} > /tmp/conntrack.conf.new
-
 # Never *lower* an already-running bigger table; never *raise* an already
 # smaller established timeout (shorter timeout = faster zombie cleanup).
 CUR_MAX=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo 0)
 [[ "$CUR_MAX" -gt "$CONNTRACK_MAX" ]] && CONNTRACK_MAX=$CUR_MAX
 CUR_TO=$(sysctl -n net.netfilter.nf_conntrack_tcp_timeout_established 2>/dev/null || echo 0)
 [[ "$CUR_TO" -gt 0 && "$CUR_TO" -lt "$CONNTRACK_EST_TIMEOUT" ]] && CONNTRACK_EST_TIMEOUT=$CUR_TO
+
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    {
+        echo "# conntrack capacity & timeout"
+        echo "net.netfilter.nf_conntrack_max = $CONNTRACK_MAX"
+        echo "net.netfilter.nf_conntrack_tcp_timeout_established = $CONNTRACK_EST_TIMEOUT"
+    } > /tmp/conntrack.conf.new
+fi
 
 c mv /tmp/conntrack.conf.new "$CONNTRACK_CONF"
 c sysctl -w "net.netfilter.nf_conntrack_max=$CONNTRACK_MAX" \
@@ -235,25 +612,27 @@ c sysctl -w "net.netfilter.nf_conntrack_max=$CONNTRACK_MAX" \
 # -----------------------------------------------------------------------------
 info "3. TCP stack: buffers, keepalive, backlogs, TIME_WAIT"
 # -----------------------------------------------------------------------------
-{
-    echo "# tcp tuning (vps_tune.sh)"
-    echo "net.ipv4.tcp_syncookies = $TCP_SYN_COOKIES"
-    echo "net.ipv4.tcp_fin_timeout = $TCP_FIN_TIMEOUT"
-    echo "net.ipv4.tcp_tw_reuse = $TCP_TW_REUSE"
-    echo "net.ipv4.tcp_max_syn_backlog = $TCP_MAX_SYN_BACKLOG"
-    echo "net.core.somaxconn = $CORE_SOMAXCONN"
-    echo "net.core.netdev_max_backlog = $CORE_NETDEV_MAX_BACKLOG"
-    echo "net.ipv4.tcp_fastopen = $TCP_FASTOPEN"
-    echo "net.ipv4.tcp_keepalive_time = $TCP_KEEPALIVE_TIME"
-    echo "net.ipv4.tcp_notsent_lowat = $TCP_NOT_SENT_LOWAT"
-    echo "net.ipv4.tcp_rmem = $TCP_RMEM"
-    echo "net.ipv4.tcp_wmem = $TCP_WMEM"
-    echo "net.core.rmem_max = $CORE_RMEM_MAX"
-    echo "net.core.wmem_max = $CORE_WMEM_MAX"
-    echo "net.core.default_qdisc = $DEFAULT_QDISC"
-    echo "net.ipv4.tcp_congestion_control = $TCP_CONGESTION"
-    echo "net.ipv4.ip_forward = $IP_FORWARD"
-} > /tmp/tune-net.conf.new
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    {
+        echo "# tcp tuning (vps_tune.sh)"
+        echo "net.ipv4.tcp_syncookies = $TCP_SYN_COOKIES"
+        echo "net.ipv4.tcp_fin_timeout = $TCP_FIN_TIMEOUT"
+        echo "net.ipv4.tcp_tw_reuse = $TCP_TW_REUSE"
+        echo "net.ipv4.tcp_max_syn_backlog = $TCP_MAX_SYN_BACKLOG"
+        echo "net.core.somaxconn = $CORE_SOMAXCONN"
+        echo "net.core.netdev_max_backlog = $CORE_NETDEV_MAX_BACKLOG"
+        echo "net.ipv4.tcp_fastopen = $TCP_FASTOPEN"
+        echo "net.ipv4.tcp_keepalive_time = $TCP_KEEPALIVE_TIME"
+        echo "net.ipv4.tcp_notsent_lowat = $TCP_NOT_SENT_LOWAT"
+        echo "net.ipv4.tcp_rmem = $TCP_RMEM"
+        echo "net.ipv4.tcp_wmem = $TCP_WMEM"
+        echo "net.core.rmem_max = $CORE_RMEM_MAX"
+        echo "net.core.wmem_max = $CORE_WMEM_MAX"
+        echo "net.core.default_qdisc = $DEFAULT_QDISC"
+        echo "net.ipv4.tcp_congestion_control = $TCP_CONGESTION"
+        echo "net.ipv4.ip_forward = $IP_FORWARD"
+    } > /tmp/tune-net.conf.new
+fi
 c mv /tmp/tune-net.conf.new "$NET_CONF"
 c sysctl -w \
       "net.ipv4.tcp_syncookies=$TCP_SYN_COOKIES" \
@@ -459,7 +838,10 @@ server=/0.e.1.a.c.5.1.1.a.7.d.f.ip6.arpa/${TS_MAGIC_DNS}"
 fi
 
 # -----------------------------------------------------------------------------
-info "6. Verification"
+tune_nginx
+
+# -----------------------------------------------------------------------------
+info "7. Verification"
 # -----------------------------------------------------------------------------
 [[ "$DRY_RUN" -eq 1 ]] && { echo; echo "Dry-run finished — nothing was changed."; exit 0; }
 
