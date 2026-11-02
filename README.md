@@ -16,7 +16,7 @@
 
 | Параметр | Значение | Зачем |
 |---|---|---|
-| `vm.swappiness` | `100` | Раньше выгружать холодные страницы в сжатый zram (он быстрый), а не держать в дефицитной RAM |
+| `vm.swappiness` | `0` | Минимизировать выгрузку в swap; существующий zram сохраняется, zswap не включается |
 | `vm.page-cluster` | `0` | Вытеснять страницы по одной — правильное поведение для zram |
 
 ### 2. Conntrack
@@ -49,6 +49,13 @@
 ### 5. DNS-кэш
 Ставит **dnsmasq** как системный резолвер вместо stub'а systemd-resolved. Кэш 10000 записей и `min-cache-ttl=3600` — записи держатся минимум час, даже если upstream-TTL короткий (у google ~300с). На боевом боксе это опустило `systemd-resolved` с 4.1% → 0.3% CPU и убрало шторм upstream-DNS (~98 запр/сек). Cutover безопасный: dnsmasq сначала поднимается и проверяется, и только потом переключается `/etc/resolv.conf` (который дополнительно защищается `chattr +i` от перезаписи cloud-init'ом при будущих загрузках). Tailscale MagicDNS сохраняется через форвард `*.ts.net` → `100.100.100.100` (автодетект tailscale0).
 
+### 6. Сетевые кольца и UDP
+Скрипт определяет физические интерфейсы и выставляет основные RX/TX-кольца в максимум, который сообщает драйвер через `ethtool -g`. Например: `ens192` на fn — 4096/4096, `ens3` на moscow — 256/256. Неподдерживаемые интерфейсы пропускаются; RX Mini/Jumbo не меняются. При загрузке `network-ring-max.service` заново определяет интерфейсы и их максимумы. Изменение колец может кратковременно прервать сетевой обмен.
+
+`net.core.rmem_default` и `net.core.wmem_default` устанавливаются в **1048576 (1 МиБ)**; пределы остаются **16777216 (16 МиБ)**. Это запас для всплесков UDP. Значения по умолчанию действуют на новые сокеты; уже открытые сохраняют размеры до пересоздания, а приложение может задавать собственный размер. Сервисы автоматически не перезапускаются.
+
+`Udp.RcvbufErrors` и `Udp.SndbufErrors` — накопленные счётчики. Скрипт выводит их как статистику с момента загрузки, не сбрасывает и не объявляет старое ненулевое значение текущей неисправностью. Для проверки нужны два замера под нагрузкой: важно отсутствие **новых** потерь. Увеличение буферов не гарантирует нулевые потери, если приложение не успевает читать данные.
+
 ## Использование
 
 ```bash
@@ -77,6 +84,9 @@ ss -s                                            # состояние сокет
 /etc/sysctl.d/99-swap.conf          # vm.swappiness, vm.page-cluster
 /etc/sysctl.d/99-conntrack.conf     # nf_conntrack_max, timeout
 /etc/sysctl.d/99-tune-net.conf      # tcp/core параметры
+/etc/sysctl.d/99-zz-udp-buffers.conf # буферы новых UDP/других сокетов
+/usr/local/sbin/network-ring-max.sh
+/etc/systemd/system/network-ring-max.service
 /etc/modprobe.d/nf_conntrack-hashsize.conf
 <path к конфигу xray>               # sniffing.destOverride
 ```
@@ -101,7 +111,7 @@ The script checks whether `/dev/zram0` exists: if not, it installs the kernel mo
 
 | Parameter | Value | Why |
 |---|---|---|
-| `vm.swappiness` | `100` | Offload cold pages into compressed zram early (it is fast) instead of keeping them in scarce RAM |
+| `vm.swappiness` | `0` | Minimize swapping; preserve existing zram and do not enable zswap |
 | `vm.page-cluster` | `0` | Swap pages one at a time — the correct behaviour for zram |
 
 ### 2. Conntrack
@@ -134,6 +144,13 @@ The script finds xray configs (x-ui and standalone) and removes `fakedns` and `q
 ### 5. DNS cache
 Installs **dnsmasq** as the system resolver in place of the systemd-resolved stub. A 10000-entry cache with `min-cache-ttl=3600` keeps records for at least an hour even when the upstream TTL is short (google's is ~300s). On the production box this dropped `systemd-resolved` from 4.1% to 0.3% CPU and eliminated the upstream DNS storm (~98 q/s). The cutover is safe: dnsmasq is started and verified first, and only then is `/etc/resolv.conf` repointed (and additionally locked with `chattr +i` so cloud-init cannot rewrite it at later boots). Tailscale MagicDNS is preserved by forwarding `*.ts.net` to `100.100.100.100` (tailscale0 is auto-detected).
 
+### 6. Network rings and UDP
+The script discovers physical interfaces and maximizes the main RX/TX rings using each driver's `ethtool -g` limits. Examples: fn's `ens192` — 4096/4096; moscow's `ens3` — 256/256. Unsupported interfaces are skipped; RX Mini/Jumbo are unchanged. At boot, `network-ring-max.service` discovers interfaces and limits again. Changing rings may briefly interrupt network traffic.
+
+`net.core.rmem_default` and `net.core.wmem_default` are set to **1048576 (1 MiB)**, keeping the **16777216 (16 MiB)** caps. This provides UDP burst headroom. Defaults apply to new sockets; existing sockets retain their buffers until recreated, and applications may choose their own sizes. Services are not automatically restarted.
+
+`Udp.RcvbufErrors` and `Udp.SndbufErrors` are cumulative counters. The script labels them as since-boot statistics without resetting them or treating a historical nonzero value as a current failure. Compare two samples under load and check for **new** drops. Larger buffers cannot guarantee zero drops if the application cannot drain its sockets fast enough.
+
 ## Usage
 
 ```bash
@@ -161,6 +178,9 @@ ss -s                                            # socket state
 /etc/sysctl.d/99-swap.conf          # vm.swappiness, vm.page-cluster
 /etc/sysctl.d/99-conntrack.conf     # nf_conntrack_max, timeout
 /etc/sysctl.d/99-tune-net.conf      # tcp/core parameters
+/etc/sysctl.d/99-zz-udp-buffers.conf # new UDP/other socket buffers
+/usr/local/sbin/network-ring-max.sh
+/etc/systemd/system/network-ring-max.service
 /etc/modprobe.d/nf_conntrack-hashsize.conf
 <path to xray config>               # sniffing.destOverride
 ```

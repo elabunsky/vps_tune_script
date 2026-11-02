@@ -5,7 +5,7 @@
 # Applies the full set of settings that keep a low-RAM VPN / Telegram-bot box
 # healthy. Learned the hard way on a real server (1 GB RAM, xray/x-ui, bots):
 #
-#   1. Swap / zram behaviour     — swappiness=100, page-cluster=0
+#   1. Swap / zram behaviour     — swappiness=0, page-cluster=0
 #   2. conntrack capacity        — bigger table, sane timeout, bigger hash
 #                                  (prevents "nf_conntrack: table full,
 #                                  dropping packet" -> SSH/VPN connection freezes)
@@ -14,6 +14,7 @@
 #   5. DNS cache                 — dnsmasq as the system resolver with a big
 #                                  min-TTL cache, replacing systemd-resolved
 #                                  stub (cuts resolved CPU + upstream DNS storm)
+#   6. Network rings / UDP       — maximum supported RX/TX, 1 MiB socket defaults
 #
 # Idempotent — safe to re-run. Must be run as root.
 #
@@ -28,7 +29,7 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # Config (numbers proven for a ~1 GB RAM production box)
 # -----------------------------------------------------------------------------
-SWAPPINESS=100                    # eager offload of cold pages into (z)ram
+SWAPPINESS=0                      # minimize swapping; preserve existing zram
 PAGE_CLUSTER=0                    # swap one page at a time (best for zram)
 ZRAM_SIZE_MB=900                  # zram disksize in MiB (same as the fn box)
                                   # only created when no zram/swap exists
@@ -53,6 +54,8 @@ TCP_RMEM="4096 87380 16777216"    # tcp receive buffer: min / default / max
 TCP_WMEM="4096 87380 16777216"    # tcp send buffer:    min / default / max
 CORE_RMEM_MAX=16777216            # absolute cap, socket receive buffer (16 MB)
 CORE_WMEM_MAX=16777216            # absolute cap, socket send buffer    (16 MB)
+CORE_RMEM_DEFAULT=1048576         # new UDP/socket receive buffers (1 MiB)
+CORE_WMEM_DEFAULT=1048576         # new UDP/socket send buffers    (1 MiB)
 DEFAULT_QDISC="fq"                # queueing discipline paired with BBR
 TCP_CONGESTION="bbr"              # congestion control (needs fq)
 IP_FORWARD=1                      # required for VPN server forwarding
@@ -84,6 +87,9 @@ TS_MAGIC_DNS="100.100.100.100"
 SYSCTL_D="/etc/sysctl.d"
 SWAP_CONF="$SYSCTL_D/99-swap.conf"
 NET_CONF="$SYSCTL_D/99-tune-net.conf"
+UDP_CONF="$SYSCTL_D/99-zz-udp-buffers.conf"
+RING_SCRIPT="/usr/local/sbin/network-ring-max.sh"
+RING_UNIT="/etc/systemd/system/network-ring-max.service"
 CONNTRACK_CONF="$SYSCTL_D/99-conntrack.conf"
 MODPROBE_D="/etc/modprobe.d"
 MODPROBE_CONF="$MODPROBE_D/nf_conntrack-hashsize.conf"
@@ -459,7 +465,95 @@ server=/0.e.1.a.c.5.1.1.a.7.d.f.ip6.arpa/${TS_MAGIC_DNS}"
 fi
 
 # -----------------------------------------------------------------------------
-info "6. Verification"
+info "6. Network rings and UDP socket buffers"
+# -----------------------------------------------------------------------------
+# A separate late-sorting file also updates servers tuned manually before.
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    DRY-RUN  : would persist $UDP_CONF: rmem_default=$CORE_RMEM_DEFAULT wmem_default=$CORE_WMEM_DEFAULT"
+else
+    printf '# UDP/socket burst headroom; existing sockets retain their buffers.\nnet.core.rmem_default = %s\nnet.core.wmem_default = %s\n' \
+        "$CORE_RMEM_DEFAULT" "$CORE_WMEM_DEFAULT" > "$UDP_CONF"
+    c sysctl -p "$UDP_CONF"
+fi
+
+# Keep tune.sh self-contained. The boot helper discovers physical interfaces
+# and queries each driver's limits again, rather than assuming ens192/4096.
+RING_HELPER=$(cat <<'RING_EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+export LC_ALL=C
+dry_run=0
+if [[ "${1:-}" == --dry-run ]]; then dry_run=1; shift; fi
+if [[ $# -eq 0 ]]; then
+    for path in /sys/class/net/*; do
+        [[ -e "$path/device" ]] || continue
+        set -- "$@" "${path##*/}"
+    done
+fi
+failed=0
+for iface in "$@"; do
+    if ! rings=$(ethtool -g "$iface" 2>/dev/null); then
+        echo "SKIP $iface: ring parameters unsupported"
+        continue
+    fi
+    read -r rx tx current_rx current_tx < <(awk '
+        /Pre-set maximums:/ { section = "max"; next }
+        /Current hardware settings:/ { section = "current"; next }
+        $1 == "RX:" { if (section == "max") rx = $2; else if (section == "current") crx = $2 }
+        $1 == "TX:" { if (section == "max") tx = $2; else if (section == "current") ctx = $2 }
+        END { print rx ? rx : "n/a", tx ? tx : "n/a", crx ? crx : "n/a", ctx ? ctx : "n/a" }
+    ' <<< "$rings")
+    options=()
+    if [[ "$rx" =~ ^[1-9][0-9]*$ && "$rx" != "$current_rx" ]]; then options+=(rx "$rx"); fi
+    if [[ "$tx" =~ ^[1-9][0-9]*$ && "$tx" != "$current_tx" ]]; then options+=(tx "$tx"); fi
+    if [[ ${#options[@]} -eq 0 ]]; then
+        echo "SKIP $iface: rings already at supported maxima, or no numeric limits"
+    elif [[ "$dry_run" -eq 1 ]]; then
+        echo "DRY-RUN: ethtool -G $iface ${options[*]}"
+    elif ethtool -G "$iface" "${options[@]}"; then
+        ethtool -g "$iface"
+    else
+        echo "ERROR $iface: failed to maximize rings" >&2
+        failed=1
+    fi
+done
+exit "$failed"
+RING_EOF
+)
+
+if ! command -v ethtool >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    c apt-get install -y ethtool
+fi
+if ! command -v ethtool >/dev/null 2>&1; then
+    skip "ethtool unavailable — install it and rerun for network ring tuning"
+elif [[ "$DRY_RUN" -eq 1 ]]; then
+    bash -s -- --dry-run <<< "$RING_HELPER"
+    echo "    DRY-RUN  : would persist $RING_SCRIPT and enable $RING_UNIT"
+else
+    printf '%s\n' "$RING_HELPER" > "$RING_SCRIPT"
+    chmod 755 "$RING_SCRIPT"
+    cat > "$RING_UNIT" <<UNIT
+[Unit]
+Description=Set maximum supported network RX and TX ring sizes
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$RING_SCRIPT
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    c systemctl daemon-reload
+    c systemctl enable network-ring-max.service
+    # Restart also reapplies changed settings when a previous unit is active.
+    c systemctl restart network-ring-max.service
+fi
+
+# -----------------------------------------------------------------------------
+info "7. Verification"
 # -----------------------------------------------------------------------------
 [[ "$DRY_RUN" -eq 1 ]] && { echo; echo "Dry-run finished — nothing was changed."; exit 0; }
 
@@ -467,7 +561,16 @@ sysctl vm.swappiness vm.page-cluster \
        net.netfilter.nf_conntrack_max \
        net.netfilter.nf_conntrack_tcp_timeout_established \
        net.ipv4.tcp_fin_timeout net.ipv4.tcp_keepalive_time \
-       net.core.rmem_max net.core.wmem_max
+       net.core.rmem_max net.core.wmem_max \
+       net.core.rmem_default net.core.wmem_default
+
+# These are lifetime counters, not evidence that drops are happening now.
+awk '/^Udp:/ {
+    if (!header++) { for (i=2; i<=NF; i++) name[i]=$i; next }
+    for (i=2; i<=NF; i++)
+        if (name[i] == "RcvbufErrors" || name[i] == "SndbufErrors")
+            printf "UDP %s since boot: %s (check the increase over time)\n", name[i], $i
+}' /proc/net/snmp
 
 if [[ -r /proc/sys/net/netfilter/nf_conntrack_count ]]; then
     echo "conntrack fill: $(< /proc/sys/net/netfilter/nf_conntrack_count) / $(< /proc/sys/net/netfilter/nf_conntrack_max)"
@@ -478,6 +581,8 @@ ok "Done. Persisted across reboots:
   $SWAP_CONF        (swap/zram)
   $CONNTRACK_CONF   (conntrack)
   $NET_CONF         (tcp)
+  $UDP_CONF         (new UDP/socket buffers)
+  $RING_UNIT        (RX/TX maxima; helper: $RING_SCRIPT, when ethtool is available)
   $MODPROBE_CONF    (conntrack hashsize at module load)
   $DNSMASQ_CONF     (dnsmasq cache)
 To simulate boot-time application:  sysctl --system"
