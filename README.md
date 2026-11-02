@@ -19,7 +19,7 @@
 
 | Параметр | Значение | Зачем |
 |---|---|---|
-| `vm.swappiness` | `100` | Раньше выгружать холодные страницы в сжатый zram (он быстрый), а не держать в дефицитной RAM |
+| `vm.swappiness` | `60` | Разрешать выгрузку холодных страниц при дефиците RAM, включая серверы с дисковым swap |
 | `vm.page-cluster` | `0` | Вытеснять страницы по одной — правильное поведение для zram |
 
 ### 2. Conntrack
@@ -153,7 +153,7 @@ The script checks whether `/dev/zram0` exists: if not, it installs the kernel mo
 
 | Parameter | Value | Why |
 |---|---|---|
-| `vm.swappiness` | `100` | Offload cold pages into compressed zram early (it is fast) instead of keeping them in scarce RAM |
+| `vm.swappiness` | `60` | Allow cold pages to move to swap under memory pressure, including disk swap |
 | `vm.page-cluster` | `0` | Swap pages one at a time — the correct behaviour for zram |
 
 ### 2. Conntrack
@@ -286,3 +286,12 @@ then removes the test service and files. Does not change `nginx.service`.
 Только Linux + systemd + Nginx. Создаёт временный сервис и конфиг, проверяет
 реальные reload/restart, лимиты workers, повторный запуск и откат невалидного
 конфига, затем удаляет тестовые файлы и сервис. `nginx.service` не меняет.
+
+## Recovery settings / Настройки после восстановления
+
+- `vm.swappiness=60` persists in `99-swap.conf` and, if present, the `[sysctl]` section of `/etc/tuned/vpn-zram/tuned.conf`. Missing keys are appended; original files are backed up once. This avoids conflicting values when tuned reapplies its profile.
+- New UDP/socket buffers default to 1 MiB (`net.core.rmem_default`, `net.core.wmem_default`); application-requested caps remain 16 MiB. Existing sockets keep their buffers. `udp_mem` remains kernel-calculated for the host RAM.
+- If `ethtool` is installed, `vps-tune-rx-rings.service` sets physical NIC RX rings to the driver's reported maximum on each boot. Already-maximized and unsupported interfaces are skipped; TX is unchanged. A change can briefly interrupt traffic.
+- UDP drop counters are cumulative since boot: compare two samples under load. Buffer tuning cannot guarantee zero drops or fix a slow application. Check `free -m`, `/proc/pressure/memory`, and `grep Udp: /proc/net/snmp`.
+
+На `moscow` интерфейс `ens3` уже имеет RX `256/256`; значение `4096` нельзя переносить с другого драйвера. Настройка swap устраняет обнаруженный запрет на обычную выгрузку холодных страниц, но сама по себе не доказывает причину всех сетевых сбоев.

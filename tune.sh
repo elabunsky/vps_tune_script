@@ -5,7 +5,7 @@
 # Applies the full set of settings that keep a low-RAM VPN / Telegram-bot box
 # healthy. Learned the hard way on a real server (1 GB RAM, xray/x-ui, bots):
 #
-#   1. Swap / zram behaviour     — swappiness=100, page-cluster=0
+#   1. Swap / zram behaviour     — swappiness=60, page-cluster=0
 #   2. conntrack capacity        — bigger table, sane timeout, bigger hash
 #                                  (prevents "nf_conntrack: table full,
 #                                  dropping packet" -> SSH/VPN connection freezes)
@@ -31,7 +31,7 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # Config (numbers proven for a ~1 GB RAM production box)
 # -----------------------------------------------------------------------------
-SWAPPINESS=100                    # eager offload of cold pages into (z)ram
+SWAPPINESS=60                     # allow cold-page swap on low-RAM hosts
 PAGE_CLUSTER=0                    # swap one page at a time (best for zram)
 ZRAM_SIZE_MB=900                  # zram disksize in MiB (same as the fn box)
                                   # only created when no zram/swap exists
@@ -56,6 +56,8 @@ TCP_RMEM="4096 87380 16777216"    # tcp receive buffer: min / default / max
 TCP_WMEM="4096 87380 16777216"    # tcp send buffer:    min / default / max
 CORE_RMEM_MAX=16777216            # absolute cap, socket receive buffer (16 MB)
 CORE_WMEM_MAX=16777216            # absolute cap, socket send buffer    (16 MB)
+CORE_RMEM_DEFAULT=1048576         # new UDP/socket receive buffers (1 MiB)
+CORE_WMEM_DEFAULT=1048576         # new UDP/socket send buffers (1 MiB)
 DEFAULT_QDISC="fq"                # queueing discipline paired with BBR
 TCP_CONGESTION="bbr"              # congestion control (needs fq)
 IP_FORWARD=1                      # required for VPN server forwarding
@@ -551,18 +553,42 @@ UNIT
 fi
 
 if swapon --show 2>/dev/null | grep -q .; then
-    if [[ "$DRY_RUN" -eq 0 ]]; then
-        {
-            echo "# swap/zram tuning"
-            grep -q "^vm.swappiness=" "$SWAP_CONF" 2>/dev/null || echo "vm.swappiness=$SWAPPINESS"
-            grep -q "^vm.page-cluster=" "$SWAP_CONF" 2>/dev/null || echo "vm.page-cluster=$PAGE_CLUSTER"
-        } > /tmp/swap.conf.new
-    fi
-    if [[ -f "$SWAP_CONF" ]]; then
-        c sed -i "s|^vm.swappiness=.*|vm.swappiness=$SWAPPINESS|; s|^vm.page-cluster=.*|vm.page-cluster=$PAGE_CLUSTER|" "$SWAP_CONF"
-        c rm -f /tmp/swap.conf.new
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo "    DRY-RUN  : persist swappiness=$SWAPPINESS, page-cluster=$PAGE_CLUSTER in $SWAP_CONF and existing vpn-zram tuned profile"
     else
-        c mv /tmp/swap.conf.new "$SWAP_CONF"
+        python3 - "$SWAP_CONF" /etc/tuned/vpn-zram/tuned.conf "$SWAPPINESS" "$PAGE_CLUSTER" <<'SWAP_PY'
+from pathlib import Path
+import re, sys
+swap, tuned = map(Path, sys.argv[1:3])
+values = {"vm.swappiness": sys.argv[3], "vm.page-cluster": sys.argv[4]}
+for path in (swap, tuned):
+    if path == tuned and not path.exists():
+        continue
+    old = path.read_text() if path.exists() else "# swap/zram tuning\n"
+    text = old
+    if path == tuned:
+        section = re.search(r"(?ms)^\[sysctl\][ \t]*\n(.*?)(?=^\[|\Z)", text)
+        block = section.group(1) if section else ""
+    else:
+        block = text
+    for key, value in values.items():
+        pattern = r"(?m)^[ \t]*" + re.escape(key) + r"[ \t]*=.*$"
+        if re.search(pattern, block):
+            block = re.sub(pattern, key + "=" + value, block)
+        else:
+            block = block.rstrip("\n") + "\n" + key + "=" + value + "\n"
+    if path == tuned:
+        text = (text[:section.start(1)] + block + text[section.end(1):]
+                if section else text.rstrip("\n") + "\n[sysctl]\n" + block)
+    else:
+        text = block
+    if text != old or not path.exists():
+        if path.exists():
+            backup = path.with_name(path.name + ".before-vps-tune-swap")
+            if not backup.exists():
+                backup.write_bytes(path.read_bytes())
+        path.write_text(text)
+SWAP_PY
     fi
     c sysctl -w "vm.swappiness=$SWAPPINESS" "vm.page-cluster=$PAGE_CLUSTER"
 else
@@ -628,6 +654,8 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
         echo "net.ipv4.tcp_wmem = $TCP_WMEM"
         echo "net.core.rmem_max = $CORE_RMEM_MAX"
         echo "net.core.wmem_max = $CORE_WMEM_MAX"
+        echo "net.core.rmem_default = $CORE_RMEM_DEFAULT"
+        echo "net.core.wmem_default = $CORE_WMEM_DEFAULT"
         echo "net.core.default_qdisc = $DEFAULT_QDISC"
         echo "net.ipv4.tcp_congestion_control = $TCP_CONGESTION"
         echo "net.ipv4.ip_forward = $IP_FORWARD"
@@ -648,9 +676,73 @@ c sysctl -w \
       "net.ipv4.tcp_wmem=$TCP_WMEM" \
       "net.core.rmem_max=$CORE_RMEM_MAX" \
       "net.core.wmem_max=$CORE_WMEM_MAX" \
+      "net.core.rmem_default=$CORE_RMEM_DEFAULT" \
+      "net.core.wmem_default=$CORE_WMEM_DEFAULT" \
       "net.core.default_qdisc=$DEFAULT_QDISC" \
       "net.ipv4.tcp_congestion_control=$TCP_CONGESTION" \
       "net.ipv4.ip_forward=$IP_FORWARD"
+
+# RX ring capacity depends on the driver; unsupported NICs are skipped.
+info "3b. NIC RX rings: supported maximum, persisted via systemd"
+if ! command -v ethtool >/dev/null 2>&1; then
+    skip "ethtool missing — RX ring tuning skipped"
+elif [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    DRY-RUN  : install and run vps-tune-rx-rings.service (driver-reported RX maximum)"
+else
+    mkdir -p /usr/local/sbin
+    cat > /usr/local/sbin/vps-tune-rx-rings <<'RINGS_SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ $# -eq 0 ]]; then
+    for path in /sys/class/net/*; do
+        [[ -e "$path/device" ]] || continue
+        set -- "$@" "${path##*/}"
+    done
+fi
+failed=0
+for iface in "$@"; do
+    if ! rings=$(LC_ALL=C ethtool -g "$iface" 2>/dev/null); then
+        echo "SKIP $iface: ring parameters unsupported"
+        continue
+    fi
+    read -r maximum current < <(awk '
+        /Pre-set maximums:/ { section="max"; next }
+        /Current hardware settings:/ { section="current"; next }
+        $1 == "RX:" && section == "max" { maximum=$2 }
+        $1 == "RX:" && section == "current" { current=$2 }
+        END { print maximum ? maximum : "n/a", current ? current : "n/a" }
+    ' <<< "$rings")
+    if [[ ! "$maximum" =~ ^[1-9][0-9]*$ || ! "$current" =~ ^[0-9]+$ ]]; then
+        echo "SKIP $iface: no numeric RX limits"
+    elif [[ "$maximum" == "$current" ]]; then
+        echo "OK $iface: RX already $current/$maximum"
+    elif ethtool -G "$iface" rx "$maximum"; then
+        echo "OK $iface: RX set to $maximum"
+    else
+        echo "ERROR $iface: unable to set RX to $maximum" >&2
+        failed=1
+    fi
+done
+exit "$failed"
+RINGS_SH
+    chmod 755 /usr/local/sbin/vps-tune-rx-rings
+    cat > /etc/systemd/system/vps-tune-rx-rings.service <<'RINGS_UNIT'
+[Unit]
+Description=Maximize supported NIC RX rings (vps_tune.sh)
+Wants=network-online.target
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vps-tune-rx-rings
+[Install]
+WantedBy=multi-user.target
+RINGS_UNIT
+    systemctl daemon-reload
+    systemctl enable vps-tune-rx-rings.service
+    if ! systemctl start vps-tune-rx-rings.service; then
+        skip "some RX rings could not be tuned — check journalctl -u vps-tune-rx-rings"
+    fi
+fi
 
 # -----------------------------------------------------------------------------
 info "4. xray sniffing: remove fakeDns / QUIC from destOverride"
@@ -849,7 +941,8 @@ sysctl vm.swappiness vm.page-cluster \
        net.netfilter.nf_conntrack_max \
        net.netfilter.nf_conntrack_tcp_timeout_established \
        net.ipv4.tcp_fin_timeout net.ipv4.tcp_keepalive_time \
-       net.core.rmem_max net.core.wmem_max
+       net.core.rmem_max net.core.wmem_max \
+       net.core.rmem_default net.core.wmem_default
 
 if [[ -r /proc/sys/net/netfilter/nf_conntrack_count ]]; then
     echo "conntrack fill: $(< /proc/sys/net/netfilter/nf_conntrack_count) / $(< /proc/sys/net/netfilter/nf_conntrack_max)"
