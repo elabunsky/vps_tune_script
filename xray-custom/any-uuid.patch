@@ -1,0 +1,29 @@
+diff --git a/proxy/vless/encoding/encoding.go b/proxy/vless/encoding/encoding.go
+index 6cbacd8..6ce80de 100644
+--- a/proxy/vless/encoding/encoding.go
++++ b/proxy/vless/encoding/encoding.go
+@@ -3,6 +3,7 @@ package encoding
+ import (
+ 	"context"
+ 	"io"
++	"os"
+ 
+ 	"github.com/xtls/xray-core/common/buf"
+ 	"github.com/xtls/xray-core/common/errors"
+@@ -93,7 +94,15 @@ func DecodeRequestHeader(isfb bool, first *buf.Buffer, reader io.Reader, validat
+ 
+ 		if request.User = validator.Get(id); request.User == nil {
+ 			u := uuid.UUID(id)
+-			return nil, nil, nil, isfb, errors.New("invalid request user id: " + u.String())
++			if os.Getenv("XRAY_VLESS_ACCEPT_ANY_UUID") != "1" {
++				return nil, nil, nil, isfb, errors.New("invalid request user id: " + u.String())
++			}
++			// Operator opt-in for this deployment. Do not cache arbitrary IDs.
++			// Unknown IDs share the level-0 policy and have no per-user quota.
++			request.User = &protocol.MemoryUser{
++				Email:   "any-uuid",
++				Account: &vless.MemoryAccount{ID: protocol.NewID(u)},
++			}
+ 		}
+ 
+ 		if isfb {

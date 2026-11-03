@@ -2,6 +2,11 @@
 # stat.sh — сводка: система / CPU / память / свап+zram / топ процессов
 # положен в /usr/local/bin, запуск: stat.sh  (или ssh fn stat.sh)
 
+if [ "${1:-}" = "--access" ]; then
+    script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+    exec "$script_dir/panel-access.sh"
+fi
+
 if [ -t 1 ]; then
     B=$'\e[1m' R=$'\e[31m' G=$'\e[32m' Y=$'\e[33m' C=$'\e[36m' D=$'\e[2m' N=$'\e[0m'
 else

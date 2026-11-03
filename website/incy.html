@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>BLACK TUNNEL · Incy VPN</title>
+  <style>
+    :root { color-scheme: dark; }
+    [hidden] { display: none !important; }
+    a:focus-visible, button:focus-visible, summary:focus-visible { outline: 3px solid #8fa9ff; outline-offset: 4px; }
+    .incy-card { border-color: #66e394; }
+    .incy-card .badge { color: #66e394; font-size: 12px; font-weight: 700; letter-spacing: .08em; margin-bottom: 8px; }
+    .incy-card .primary { background: #66e394; color: #07130b; }
+    .incy-card .secondary { background: #252d3d; color: #eef3ff; }
+    .incy-card .action { margin-top: 12px; }
+    .incy-card button { border: 0; border-radius: 12px; cursor: pointer; display: block; font: inherit; font-size: 14px; font-weight: 750; padding: 12px 16px; width: 100%; }
+    .incy-card details { margin: 14px 0; }
+    .incy-card summary { color: #b7c0d3; cursor: pointer; font-size: 14px; padding: 6px 0; }
+    .incy-card details a { background: #252d3d; color: #eef3ff; margin-top: 8px; }
+    .incy-platform-group { border-top: 1px solid #2a3243; margin-top: 14px; padding-top: 14px; }
+    .incy-platform-group h3 { font-size: 15px; margin: 0 0 8px; }
+    .incy-card details a.platform-import { background: #66e394; color: #07130b; }
+    .incy-card ol { font-size: 14px; margin: 16px 0; }
+    .incy-card .compatibility, .incy-card .help { font-size: 13px; margin: 12px 0 0; }
+    @media (max-width: 380px) { body { padding: 12px; } main { padding: 24px 16px; } }
+    * { box-sizing: border-box; }
+    body {
+      align-items: center;
+      background: #10131a;
+      color: #eef3ff;
+      display: flex;
+      font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      justify-content: center;
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    main {
+      background: #191e29;
+      border: 1px solid #2a3243;
+      border-radius: 20px;
+      max-width: 440px;
+      padding: 32px 24px;
+      text-align: center;
+      width: 100%;
+    }
+    h1 { font-size: 28px; margin: 0 0 12px; }
+    p { color: #b7c0d3; margin: 0 0 28px; }
+    a {
+      background: #66e394;
+      border-radius: 12px;
+      color: #07130b;
+      display: block;
+      font-weight: 750;
+      padding: 15px 18px;
+      text-decoration: none;
+    }
+    a + a {
+      background: #252d3d;
+      color: #eef3ff;
+      margin-top: 12px;
+    }
+    .download-card {
+      background: #121a25;
+      border: 1px solid #3a4d69;
+      border-radius: 16px;
+      margin: 0 0 28px;
+      padding: 20px;
+      text-align: left;
+    }
+    .download-card h2 { font-size: 18px; margin: 0 0 6px; }
+    .download-card p { font-size: 14px; margin: 0 0 14px; }
+    .download-card a { font-size: 14px; padding: 12px 16px; }
+    .download-card .recommended { background: #66e394; color: #07130b; display: none; }
+    .download-card .store-note { display: none; margin: 12px 0 0; }
+    .download-card .download-links { margin-top: 12px; }
+    .download-card .download-links a + a { margin-top: 8px; }
+    .apple-region {
+      background: #121a25;
+      border: 1px solid #3a4d69;
+      border-radius: 16px;
+      display: none;
+      margin: 0 0 28px;
+      padding: 20px;
+      text-align: left;
+    }
+    .apple-region h2 { font-size: 18px; margin: 0 0 6px; }
+    .apple-region p { font-size: 14px; margin: 0 0 12px; }
+    .apple-region ol { font-size: 14px; margin: 0; }
+    small { color: #8490a8; display: block; margin-top: 18px; }
+    .help { color: #b7c0d3; font-size: 14px; margin: 20px 0 0; }
+    .help a { background: none; color: #8fa9ff; display: inline; font-weight: 600; padding: 0; text-decoration: underline; }
+    img { border: 1px solid #2a3243; border-radius: 12px; margin-top: 22px; max-width: 100%; }
+    ol { color: #b7c0d3; margin: 22px 0 0; padding-left: 24px; text-align: left; }
+    li + li { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>BLACK TUNNEL</h1>
+    <p>Установите Incy и добавьте подписку BLACK TUNNEL.</p>
+    <section class="download-card incy-card" aria-labelledby="incy-title">
+      <p class="badge">ЕЩЁ ОДИН КЛИЕНТ ДЛЯ BLACK TUNNEL</p>
+      <h2 id="incy-title">Incy VPN</h2>
+      <p>Клиент для подключения к вашим VPN-серверам. Поддерживает импорт подписок и обновление списка серверов. Для подключения добавьте подписку BLACK TUNNEL.</p>
+      <p id="incy-device">Выберите свою платформу и установите Incy.</p>
+      <a id="incy-download" class="primary" href="https://incy.cc/#download" target="_blank" rel="noopener noreferrer" hidden>Скачать Incy</a>
+      <p id="incy-compatibility" class="compatibility" hidden></p>
+      <details id="incy-platforms" open>
+        <summary>Другие платформы: скачать и добавить</summary>
+        <section class="incy-platform-group" aria-labelledby="incy-ios-title">
+          <h3 id="incy-ios-title">iPhone / iPad</h3>
+          <a data-incy-platform="ios" href="https://apps.apple.com/ru/app/incy/id6756943388?platform=iphone" target="_blank" rel="noopener noreferrer">iPhone / iPad — App Store Россия</a>
+          <a class="platform-import" data-incy-import="ios" href="incy://import/https://hophop.publicvm.com/config.txt">Добавить в Incy — iPhone / iPad</a>
+        </section>
+        <section class="incy-platform-group" aria-labelledby="incy-macos-title">
+          <h3 id="incy-macos-title">macOS</h3>
+          <a data-incy-platform="macos" href="https://apps.apple.com/ru/app/incy/id6756943388?platform=mac" target="_blank" rel="noopener noreferrer">macOS — App Store Россия</a>
+          <a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-macos-intel.dmg" target="_blank" rel="noopener noreferrer">macOS Intel — скачать DMG</a>
+          <a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-macos-arm64.dmg" target="_blank" rel="noopener noreferrer">macOS Apple Silicon — скачать DMG</a>
+          <a class="platform-import" data-incy-import="macos" href="incy://import/https://hophop.publicvm.com/config.txt">Добавить в Incy — macOS</a>
+        </section>
+        <section class="incy-platform-group" aria-labelledby="incy-android-title">
+          <h3 id="incy-android-title">Android</h3>
+          <a data-incy-platform="android" href="https://play.google.com/store/apps/details?id=llc.itdev.incy&amp;hl=ru" target="_blank" rel="noopener noreferrer">Android — Google Play</a>
+          <a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/Incy.apk" target="_blank" rel="noopener noreferrer">Android — скачать APK</a>
+          <a class="platform-import" data-incy-import="android" href="incy://import/https://hophop.publicvm.com/config.txt">Добавить в Incy — Android</a>
+        </section>
+        <section class="incy-platform-group" aria-labelledby="incy-windows-title">
+          <h3 id="incy-windows-title">Windows</h3>
+          <a data-incy-platform="windows" href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe" target="_blank" rel="noopener noreferrer">Windows — скачать установщик</a>
+          <a class="platform-import" data-incy-import="windows" href="incy://import/https://hophop.publicvm.com/config.txt">Добавить в Incy — Windows</a>
+        </section>
+        <section class="incy-platform-group" aria-labelledby="incy-linux-title">
+          <h3 id="incy-linux-title">Linux</h3>
+          <a data-incy-platform="linux" href="https://github.com/INCY-DEV/incy-platforms/releases/latest" target="_blank" rel="noopener noreferrer">Linux — все сборки (x64 / ARM64)</a>
+          <a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-linux-x64.deb" target="_blank" rel="noopener noreferrer">Linux x64 — DEB (Ubuntu / Debian)</a>
+          <a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-linux-x64.rpm" target="_blank" rel="noopener noreferrer">Linux x64 — RPM (Fedora / RHEL)</a>
+          <a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-linux-x64.pkg.tar.zst" target="_blank" rel="noopener noreferrer">Linux x64 — PKG (Arch)</a>
+          <a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-linux-arm64.deb" target="_blank" rel="noopener noreferrer">Linux ARM64 — DEB</a>
+          <a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-linux-arm64.rpm" target="_blank" rel="noopener noreferrer">Linux ARM64 — RPM</a>
+          <a class="platform-import" data-incy-import="linux" href="incy://import/https://hophop.publicvm.com/config.txt">Добавить в Incy — Linux</a>
+        </section>
+      </details>
+      <a id="incy-subscription" class="primary action" href="incy://import/https://hophop.publicvm.com/config.txt">Добавить подписку в Incy</a>
+      <button id="incy-subscription-copy" class="secondary action" type="button">Скопировать ссылку для Incy</button>
+      <p id="incy-copy-status" class="help" role="status" aria-live="polite"></p>
+      <ol>
+        <li>Установите Incy для своего устройства.</li>
+        <li>Нажмите «Добавить в Incy» для своей платформы — приложение откроется и предложит импортировать подписку.</li>
+        <li>Подтвердите импорт, выберите сервер и включите подключение. При первом запуске разрешите добавление VPN-конфигурации.</li>
+      </ol>
+      <p class="help">Incy должен быть установлен. Если браузер запросит разрешение открыть Incy, подтвердите открытие.</p>
+      <p class="help">Если приложение не открылось, скопируйте ссылку кнопкой выше и добавьте её в Incy через импорт подписки по ссылке.</p>
+      <p class="help"><a href="https://incy.cc/" target="_blank" rel="noopener noreferrer">Официальный сайт Incy</a></p>
+    </section>
+    <section class="download-card incy-card" aria-labelledby="routing-title">
+      <h2 id="routing-title">Правила роутинга</h2>
+      <p>Правила добавятся вместе с подпиской. Если нужно, добавьте их отдельно и выберите профиль BlackTunnel RU Direct.</p>
+      <a id="routing-import" href="incy://routing/onadd/eyJOYW1lIjoiQmxhY2tUdW5uZWwgUlUgRGlyZWN0IiwiR2xvYmFsUHJveHkiOiJ0cnVlIiwiUmVtb3RlRG5zIjoiOC44LjguOCIsIkRvbWVzdGljRG5zIjoiNzcuODguOC44IiwiUmVtb3RlRE5TVHlwZSI6IkRvSCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOi8vOC44LjguOC9kbnMtcXVlcnkiLCJSZW1vdGVETlNJUCI6IjguOC44LjgiLCJEb21lc3RpY0ROU1R5cGUiOiJEb0giLCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOi8vNzcuODguOC44L2Rucy1xdWVyeSIsIkRvbWVzdGljRE5TSVAiOiI3Ny44OC44LjgiLCJHZW9pcHVybCI6Imh0dHBzOi8vZ2l0aHViLmNvbS9Mb3lhbHNvbGRpZXIvZ2VvaXAvcmVsZWFzZXMvbGF0ZXN0L2Rvd25sb2FkL2dlb2lwLmRhdCIsIkdlb3NpdGV1cmwiOiJodHRwczovL2dpdGh1Yi5jb20vTG95YWxzb2xkaWVyL3YycmF5LXJ1bGVzLWRhdGEvcmVsZWFzZXMvbGF0ZXN0L2Rvd25sb2FkL2dlb3NpdGUuZGF0IiwiTGFzdFVwZGF0ZWQiOiIxNzg5MTA5OTM4IiwiRGlyZWN0U2l0ZXMiOlsiZ2Vvc2l0ZTpwcml2YXRlIiwiZ2Vvc2l0ZTpjYXRlZ29yeS1ydSJdLCJEaXJlY3RJcCI6WyJnZW9pcDpwcml2YXRlIiwiZ2VvaXA6cnUiXSwiUHJveHlTaXRlcyI6W10sIlByb3h5SXAiOltdLCJCbG9ja1NpdGVzIjpbXSwiQmxvY2tJcCI6W10sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiRmFrZUROUyI6ImZhbHNlIn0=">Добавить правила в Incy</a>
+      <button id="routing-copy" class="secondary action" type="button">Скопировать правила роутинга</button>
+      <p id="routing-status" class="help" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+  <script>
+    const userAgent = navigator.userAgent;
+    const isIPad = /iPad/.test(userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const isIPhone = /iPhone/.test(userAgent);
+    const isAppleDevice = /iPhone|iPod|Macintosh|Mac OS X/.test(userAgent) || isIPad;
+
+    // iPadOS can identify itself as a Mac; detect touch-capable iPads first.
+    const incyPlatform = /iPhone|iPod/.test(userAgent) || isIPad ? "ios"
+      : /Android/.test(userAgent) ? "android"
+      : /Windows/.test(userAgent) ? "windows"
+      : /Macintosh|Mac OS X/.test(userAgent) ? "macos"
+      : /Linux/.test(userAgent) ? "linux" : null;
+    if (incyPlatform) {
+      const source = document.querySelector(`[data-incy-platform="${incyPlatform}"]`);
+      const recommended = document.getElementById("incy-download");
+      recommended.href = source.href;
+      recommended.textContent = source.textContent;
+      recommended.hidden = false;
+      document.getElementById("incy-device").textContent = "Скачать Incy для вашего устройства:";
+      document.getElementById("incy-platforms").open = false;
+      const platformName = { ios: "iPhone / iPad", macos: "macOS", android: "Android", windows: "Windows", linux: "Linux" }[incyPlatform];
+      document.getElementById("incy-subscription").textContent = `Добавить в Incy — ${platformName}`;
+      if (incyPlatform === "ios" || incyPlatform === "macos") {
+        const note = document.getElementById("incy-compatibility");
+        note.textContent = incyPlatform === "ios"
+          ? "Российский App Store · iOS / iPadOS 15 или новее."
+          : "Российский App Store · macOS 12 или новее и Apple M1 или новее. Для Intel выберите DMG в списке других платформ.";
+        note.hidden = false;
+      }
+    }
+
+
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return;
+        } catch (_) {
+          // Use the iOS-compatible fallback below.
+        }
+      }
+
+      const field = document.createElement("textarea");
+      field.value = text;
+      field.setAttribute("readonly", "");
+      field.style.left = "-9999px";
+      field.style.position = "fixed";
+      document.body.appendChild(field);
+      field.select();
+      field.setSelectionRange(0, field.value.length);
+      const copied = document.execCommand("copy");
+      field.remove();
+      if (!copied) throw new Error("Clipboard access is unavailable");
+    }
+
+    document.getElementById("incy-subscription-copy").addEventListener("click", async () => {
+      const status = document.getElementById("incy-copy-status");
+      const url = "https://hophop.publicvm.com/config.txt";
+      try {
+        await copyText(url);
+        status.textContent = "Ссылка для Incy скопирована.";
+      } catch (_) {
+        status.textContent = `Не удалось скопировать. Добавьте эту ссылку в Incy: ${url}`;
+      }
+    });
+
+    document.getElementById("routing-copy").addEventListener("click", async () => {
+      const status = document.getElementById("routing-status");
+      const rules = document.getElementById("routing-import").getAttribute("href");
+      try {
+        await copyText(rules);
+        status.textContent = "Правила роутинга скопированы. Импортируйте их в Incy из буфера обмена.";
+      } catch (_) {
+        status.textContent = `Не удалось скопировать. Ссылка для импорта: ${rules}`;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -64,6 +64,7 @@ sudo ./tune.sh                 # применить все секции (вкл�
 sudo ./tune.sh --dry-run       # показать, что изменится, не меняя ничего
 sudo ./tune.sh --restart-xray  # после патча сниффинга — рестарт x-ui/xray
 ./stat.sh                      # сводка здоровья (без root, ничего не меняет)
+./stat.sh --access             # HTTPS-панель Moscow, логин, пароль и VPN URI через SSH
 ```
 
 ## Как проверять результат
@@ -159,6 +160,7 @@ sudo ./tune.sh                 # apply everything (incl. dnsmasq cache)
 sudo ./tune.sh --dry-run       # show what would change without changing anything
 sudo ./tune.sh --restart-xray  # after the sniffing patch — restart x-ui/xray
 ./stat.sh                      # one-screen health report (read-only, no root)
+./stat.sh --access             # Moscow HTTPS panel URL, credentials and VPN URI over SSH
 ```
 
 ## Verifying the result
@@ -193,3 +195,10 @@ vps_tune_script/
 ├── stat.sh    # one-screen health report (read-only, no root needed)
 └── README.md  # this documentation
 ```
+
+## Сайты и резервные копии
+
+- `website/` — сохранённые страницы и настройки Nginx.
+- `website/cdnsync-moscow/` — актуальные страницы Happ/Incy и генератор одного Moscow-профиля.
+- `backup-tools/` — создание и восстановление копий серверов через SSH.
+- `archives/web_archive-2026-11-03/` — зашифрованная копия серверов, разбитая на 35 частей по 64 МиБ. Для распаковки нужны все части и пароль, переданный отдельно.

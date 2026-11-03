@@ -1,0 +1,20 @@
+[Unit]
+Description=CDNSYNC Moscow subscription generator
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/cdnsync-subgen
+ExecStart=/usr/bin/python3 /opt/cdnsync-subgen/subgen.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

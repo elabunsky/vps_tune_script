@@ -1,0 +1,197 @@
+{
+  "cpu": "Intel Xeon E5-2697 v4, 2 vCPU; test used one thread",
+  "raw": [
+    {
+      "round": 1,
+      "algorithm": "aes-128-gcm",
+      "bytes": 1400,
+      "rc": 0,
+      "result": "+H:1400\n+F:25:AES-128-GCM:1102561600.00",
+      "stderr": "+DT:AES-128-GCM:2:1400\n+R:1575088:AES-128-GCM:2.000000"
+    },
+    {
+      "round": 1,
+      "algorithm": "aes-256-gcm",
+      "bytes": 1400,
+      "rc": 0,
+      "result": "+H:1400\n+F:25:AES-256-GCM:912956800.00",
+      "stderr": "+DT:AES-256-GCM:2:1400\n+R:1304224:AES-256-GCM:2.000000"
+    },
+    {
+      "round": 1,
+      "algorithm": "chacha20-poly1305",
+      "bytes": 1400,
+      "rc": 0,
+      "result": "+H:1400\n+F:25:ChaCha20-Poly1305:263302388.06",
+      "stderr": "+DT:ChaCha20-Poly1305:2:1400\n+R:378027:ChaCha20-Poly1305:2.010000"
+    },
+    {
+      "round": 1,
+      "algorithm": "aes-128-gcm",
+      "bytes": 16384,
+      "rc": 0,
+      "result": "+H:16384\n+F:25:AES-128-GCM:911087605.91",
+      "stderr": "+DT:AES-128-GCM:2:16384\n+R:112885:AES-128-GCM:2.030000"
+    },
+    {
+      "round": 1,
+      "algorithm": "aes-256-gcm",
+      "bytes": 16384,
+      "rc": 0,
+      "result": "+H:16384\n+F:25:AES-256-GCM:620446130.97",
+      "stderr": "+DT:AES-256-GCM:2:16384\n+R:85584:AES-256-GCM:2.260000"
+    },
+    {
+      "round": 1,
+      "algorithm": "chacha20-poly1305",
+      "bytes": 16384,
+      "rc": 0,
+      "result": "+H:16384\n+F:25:ChaCha20-Poly1305:234793052.25",
+      "stderr": "+DT:ChaCha20-Poly1305:2:16384\n+R:31814:ChaCha20-Poly1305:2.220000"
+    },
+    {
+      "round": 1,
+      "algorithm": "X25519",
+      "bytes": 0,
+      "rc": 0,
+      "result": "+F5:22:253:5199.019608:0.000192",
+      "stderr": "+DTP:253::ecdh:2\n+R7:10606:253:2.04"
+    },
+    {
+      "round": 2,
+      "algorithm": "aes-128-gcm",
+      "bytes": 1400,
+      "rc": 0,
+      "result": "+H:1400\n+F:25:AES-128-GCM:431100990.99",
+      "stderr": "+DT:AES-128-GCM:2:1400\n+R:683603:AES-128-GCM:2.220000"
+    },
+    {
+      "round": 2,
+      "algorithm": "aes-256-gcm",
+      "bytes": 1400,
+      "rc": 0,
+      "result": "+H:1400\n+F:25:AES-256-GCM:312781397.38",
+      "stderr": "+DT:AES-256-GCM:2:1400\n+R:511621:AES-256-GCM:2.290000"
+    },
+    {
+      "round": 2,
+      "algorithm": "chacha20-poly1305",
+      "bytes": 1400,
+      "rc": 0,
+      "result": "+H:1400\n+F:25:ChaCha20-Poly1305:131848275.86",
+      "stderr": "+DT:ChaCha20-Poly1305:2:1400\n+R:191180:ChaCha20-Poly1305:2.030000"
+    },
+    {
+      "round": 2,
+      "algorithm": "aes-128-gcm",
+      "bytes": 16384,
+      "rc": 0,
+      "result": "+H:16384\n+F:25:AES-128-GCM:689383291.54",
+      "stderr": "+DT:AES-128-GCM:2:16384\n+R:84574:AES-128-GCM:2.010000"
+    },
+    {
+      "round": 2,
+      "algorithm": "aes-256-gcm",
+      "bytes": 16384,
+      "rc": 0,
+      "result": "+H:16384\n+F:25:AES-256-GCM:614671734.63",
+      "stderr": "+DT:AES-256-GCM:2:16384\n+R:76909:AES-256-GCM:2.050000"
+    },
+    {
+      "round": 2,
+      "algorithm": "chacha20-poly1305",
+      "bytes": 16384,
+      "rc": 0,
+      "result": "+H:16384\n+F:25:ChaCha20-Poly1305:261762236.89",
+      "stderr": "+DT:ChaCha20-Poly1305:2:16384\n+R:32912:ChaCha20-Poly1305:2.060000"
+    },
+    {
+      "round": 2,
+      "algorithm": "X25519",
+      "bytes": 0,
+      "rc": 0,
+      "result": "+F5:22:253:4184.951456:0.000239",
+      "stderr": "+DTP:253::ecdh:2\n+R7:8621:253:2.06"
+    },
+    {
+      "round": 3,
+      "algorithm": "aes-128-gcm",
+      "bytes": 1400,
+      "rc": 0,
+      "result": "+H:1400\n+F:25:AES-128-GCM:414420568.72",
+      "stderr": "+DT:AES-128-GCM:2:1400\n+R:624591:AES-128-GCM:2.110000"
+    },
+    {
+      "round": 3,
+      "algorithm": "aes-256-gcm",
+      "bytes": 1400,
+      "rc": 0,
+      "result": "+H:1400\n+F:25:AES-256-GCM:409641883.41",
+      "stderr": "+DT:AES-256-GCM:2:1400\n+R:652501:AES-256-GCM:2.230000"
+    },
+    {
+      "round": 3,
+      "algorithm": "chacha20-poly1305",
+      "bytes": 1400,
+      "rc": 0,
+      "result": "+H:1400\n+F:25:ChaCha20-Poly1305:184881900.00",
+      "stderr": "+DT:ChaCha20-Poly1305:2:1400\n+R:264117:ChaCha20-Poly1305:2.000000"
+    },
+    {
+      "round": 3,
+      "algorithm": "aes-128-gcm",
+      "bytes": 16384,
+      "rc": 0,
+      "result": "+H:16384\n+F:25:AES-128-GCM:842797309.73",
+      "stderr": "+DT:AES-128-GCM:2:16384\n+R:116255:AES-128-GCM:2.260000"
+    },
+    {
+      "round": 3,
+      "algorithm": "aes-256-gcm",
+      "bytes": 16384,
+      "rc": 0,
+      "result": "+H:16384\n+F:25:AES-256-GCM:649169592.12",
+      "stderr": "+DT:AES-256-GCM:2:16384\n+R:80433:AES-256-GCM:2.030000"
+    },
+    {
+      "round": 3,
+      "algorithm": "chacha20-poly1305",
+      "bytes": 16384,
+      "rc": 0,
+      "result": "+H:16384\n+F:25:ChaCha20-Poly1305:297771008.00",
+      "stderr": "+DT:ChaCha20-Poly1305:2:16384\n+R:36349:ChaCha20-Poly1305:2.000000"
+    },
+    {
+      "round": 3,
+      "algorithm": "X25519",
+      "bytes": 0,
+      "rc": 0,
+      "result": "+F5:22:253:5409.500000:0.000185",
+      "stderr": "+DTP:253::ecdh:2\n+R7:10819:253:2.00"
+    },
+    {
+      "cpu_delta": [
+        241,
+        2057,
+        405,
+        3259,
+        50,
+        0,
+        203,
+        0,
+        0,
+        0
+      ],
+      "load": "1.07 0.43 0.35 1/358 61292"
+    }
+  ],
+  "medians": {
+    "aes-128-gcm/1400": 431100990.99,
+    "aes-256-gcm/1400": 409641883.41,
+    "chacha20-poly1305/1400": 184881900,
+    "aes-128-gcm/16384": 842797309.73,
+    "aes-256-gcm/16384": 620446130.97,
+    "chacha20-poly1305/16384": 261762236.89,
+    "X25519/0": 5199.019608
+  }
+}

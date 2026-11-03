@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>BLACK TUNNEL · Happ</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      align-items: center;
+      background: #10131a;
+      color: #eef3ff;
+      display: flex;
+      font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      justify-content: center;
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    main {
+      background: #191e29;
+      border: 1px solid #2a3243;
+      border-radius: 20px;
+      max-width: 440px;
+      padding: 32px 24px;
+      text-align: center;
+      width: 100%;
+    }
+    h1 { font-size: 28px; margin: 0 0 12px; }
+    p { color: #b7c0d3; margin: 0 0 28px; }
+    a {
+      background: #66e394;
+      border-radius: 12px;
+      color: #07130b;
+      display: block;
+      font-weight: 750;
+      padding: 15px 18px;
+      text-decoration: none;
+    }
+    a + a {
+      background: #252d3d;
+      color: #eef3ff;
+      margin-top: 12px;
+    }
+    .download-card {
+      background: #121a25;
+      border: 1px solid #3a4d69;
+      border-radius: 16px;
+      margin: 0 0 28px;
+      padding: 20px;
+      text-align: left;
+    }
+    .download-card h2 { font-size: 18px; margin: 0 0 6px; }
+    .download-card p { font-size: 14px; margin: 0 0 14px; }
+    .download-card a { font-size: 14px; padding: 12px 16px; }
+    .download-card .recommended { background: #66e394; color: #07130b; display: none; }
+    .download-card .store-note { display: none; margin: 12px 0 0; }
+    .download-card .download-links { margin-top: 12px; }
+    .download-card .download-links a + a { margin-top: 8px; }
+    .apple-region {
+      background: #121a25;
+      border: 1px solid #3a4d69;
+      border-radius: 16px;
+      display: none;
+      margin: 0 0 28px;
+      padding: 20px;
+      text-align: left;
+    }
+    .apple-region h2 { font-size: 18px; margin: 0 0 6px; }
+    .apple-region p { font-size: 14px; margin: 0 0 12px; }
+    .apple-region ol { font-size: 14px; margin: 0; }
+    small { color: #8490a8; display: block; margin-top: 18px; }
+    .help { color: #b7c0d3; font-size: 14px; margin: 20px 0 0; }
+    .help a { background: none; color: #8fa9ff; display: inline; font-weight: 600; padding: 0; text-decoration: underline; }
+    img { border: 1px solid #2a3243; border-radius: 12px; margin-top: 22px; max-width: 100%; }
+    ol { color: #b7c0d3; margin: 22px 0 0; padding-left: 24px; text-align: left; }
+    li + li { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <nav style="display:flex;gap:16px;justify-content:center;margin-bottom:22px"><a style="background:none;color:#8fa9ff;padding:0" href="/add.html">Подключение</a><a style="background:none;color:#8fa9ff;padding:0;margin:0" href="/incy.html">Incy</a></nav>
+    <h1>BLACK TUNNEL</h1>
+    <section class="download-card" aria-labelledby="download-title">
+      <h2 id="download-title">Нет Happ?</h2>
+      <p id="download-text">Скачайте приложение по ссылкам ниже.</p>
+      <a id="recommended-download" class="recommended" href="#" target="_blank" rel="noopener noreferrer"></a>
+      <p id="iphone-lite-store-note" class="store-note">Happ Lite доступен в российском App Store.</p>
+      <div id="download-links" class="download-links">
+        <a data-platform="apple" href="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215" target="_blank" rel="noopener noreferrer">iPhone / iPad — App Store</a>
+        <a data-platform="apple" href="https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643" target="_blank" rel="noopener noreferrer">iPhone / iPad — App Store Россия</a>
+        <a data-platform="android" href="https://play.google.com/store/apps/details?id=com.happproxy" target="_blank" rel="noopener noreferrer">Android — Google Play</a>
+        <a data-platform="windows" href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe" target="_blank" rel="noopener noreferrer">Windows — скачать установщик</a>
+        <a data-platform="macos" href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg" target="_blank" rel="noopener noreferrer">macOS — скачать для Mac</a>
+        <a data-platform="linux" data-package="deb" href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.linux.x64.deb" target="_blank" rel="noopener noreferrer">Linux — DEB (Ubuntu / Debian)</a>
+        <a data-platform="linux" data-package="rpm" href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.linux.x64.rpm" target="_blank" rel="noopener noreferrer">Linux — RPM (Fedora / RHEL)</a>
+        <a data-platform="linux" data-package="arch" href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.linux.x64.pkg.tar.zst" target="_blank" rel="noopener noreferrer">Linux — PKG (Arch)</a>
+      </div>
+    </section>
+    <section id="apple-region" class="apple-region" aria-labelledby="apple-region-title">
+      <h2 id="apple-region-title">Не видно Happ в App Store?</h2>
+      <p>Смените регион Apple Account на США, затем откройте ссылку App Store ещё раз.</p>
+      <ol>
+        <li><strong>iPhone / iPad:</strong> Настройки → ваше имя → «Медиаматериалы и покупки» → «Просмотреть» → «Страна/регион» → «Изменить страну или регион» → United States.</li>
+        <li><strong>Mac:</strong> App Store → имя внизу боковой панели → «Настройки учётной записи» → «Изменить страну или регион» → United States.</li>
+        <li>Перед сменой региона может понадобиться отменить подписки, потратить остаток баланса и указать платёжные данные и адрес для нового региона.</li>
+      </ol>
+      <p><strong>Если открылась форма оплаты:</strong> выберите <strong>None</strong>, если этот вариант доступен. Тогда не заполняйте номер карты, срок действия и CVV. Если варианта None нет, Apple требует действительный способ оплаты и платёжный адрес, принадлежащие вам; вымышленные данные или чужую карту использовать нельзя.</p>
+      <p class="help"><a href="https://support.apple.com/118283" target="_blank" rel="noopener noreferrer">Официальная инструкция Apple</a></p>
+    </section>
+    <p>После установки Happ добавьте подписку — всё остальное настроится автоматически.</p>
+    <a id="subscription" href="happ://add/https://cdnsync.fedya-sbp.ru/happ.txt">Добавить в Happ</a>
+    <a id="subscription-copy" href="#">Скопировать ссылку подписки</a>
+    <p id="iphone-lite-help" class="help" hidden>Если у вас iPhone и установлен Happ Lite из российского App Store, добавьте правила роутинга вручную: скопируйте правила, в Happ Lite нажмите «+» и при добавлении выберите профиль <strong>Black Tunnel</strong>.</p>
+    <a id="routing-copy" href="#">Скопировать правила роутинга</a>
+    <p class="help">Если правила роутинга не скопировались при установке, добавьте их сейчас: скопируйте правила, в Happ нажмите «+» и при добавлении выберите профиль <strong>Black Tunnel</strong>.</p>
+    <img src="happ-import-guide.png" alt="В Happ нажмите плюс и выберите Import from clipboard">
+    <ol>
+      <li>Нажмите «Скопировать ссылку подписки».</li>
+      <li>Откройте Happ и нажмите «+» в правом верхнем углу.</li>
+      <li>Выберите <strong>Import from clipboard</strong>.</li>
+      <li>Выберите подписку и подтвердите профиль <strong>BLACK TUNNEL</strong>.</li>
+    </ol>
+    <small>Нужен установленный клиент Happ.</small>
+  </main>
+  <script>
+    const recommendedDownload = document.getElementById("recommended-download");
+    const downloadText = document.getElementById("download-text");
+    const downloadLinks = document.getElementById("download-links");
+    const userAgent = navigator.userAgent;
+    const isIPad = /iPad/.test(userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const isIPhone = /iPhone/.test(userAgent);
+    const isAppleDevice = /iPhone|iPod|Macintosh|Mac OS X/.test(userAgent) || isIPad;
+    let download;
+
+    if (isAppleDevice) {
+      document.getElementById("apple-region").style.display = "block";
+    }
+
+    if (isIPhone) {
+      download = {
+        href: "https://apps.apple.com/ru/app/happ-lite/id6799917773",
+        device: "iPhone",
+        label: "Скачать Happ Lite"
+      };
+      document.getElementById("iphone-lite-store-note").style.display = "block";
+      document.getElementById("iphone-lite-help").hidden = false;
+    } else if (isIPad) {
+      const russianStore = navigator.language.toLowerCase().startsWith("ru");
+      download = {
+        href: russianStore
+          ? "https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643"
+          : "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+        device: "iPad",
+        label: "Скачать Happ для iPad"
+      };
+    } else if (/Android/.test(userAgent)) {
+      download = {
+        href: "https://play.google.com/store/apps/details?id=com.happproxy",
+        device: "Android",
+        label: "Скачать Happ в Google Play"
+      };
+    } else if (/Windows/.test(userAgent)) {
+      download = {
+        href: "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
+        device: "Windows",
+        label: "Скачать Happ для Windows"
+      };
+    } else if (/Macintosh|Mac OS X/.test(userAgent)) {
+      download = {
+        href: "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg",
+        device: "macOS",
+        label: "Скачать Happ для Mac"
+      };
+    } else if (/Linux/.test(userAgent)) {
+      const ua = userAgent.toLowerCase();
+      const packageType = /ubuntu|debian|mint|pop!_os|elementary/.test(ua)
+        ? "deb"
+        : /fedora|rhel|red hat|centos|rocky|alma|opensuse|suse/.test(ua)
+          ? "rpm"
+          : /arch|manjaro|endeavouros/.test(ua)
+            ? "arch"
+            : null;
+
+      if (packageType) {
+        const linuxLink = downloadLinks.querySelector(`[data-package="${packageType}"]`);
+        download = {
+          href: linuxLink.href,
+          device: "Linux",
+          label: linuxLink.textContent
+        };
+      } else {
+        downloadText.textContent = "Похоже, вы открыли страницу на Linux. Выберите формат для вашего дистрибутива.";
+        downloadLinks.querySelectorAll("a").forEach((link) => {
+          link.hidden = link.dataset.platform !== "linux";
+        });
+      }
+    }
+
+    if (download) {
+      downloadText.textContent = `Похоже, вы открыли страницу на ${download.device}. Скачайте Happ по ссылке ниже.`;
+      recommendedDownload.href = download.href;
+      recommendedDownload.textContent = download.label;
+      recommendedDownload.style.display = "block";
+      downloadLinks.hidden = true;
+    }
+
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return;
+        } catch (_) {
+          // Use the iOS-compatible fallback below.
+        }
+      }
+
+      const field = document.createElement("textarea");
+      field.value = text;
+      field.setAttribute("readonly", "");
+      field.style.left = "-9999px";
+      field.style.position = "fixed";
+      document.body.appendChild(field);
+      field.select();
+      field.setSelectionRange(0, field.value.length);
+      const copied = document.execCommand("copy");
+      field.remove();
+      if (!copied) throw new Error("Clipboard access is unavailable");
+    }
+
+    document.getElementById("subscription-copy").addEventListener("click", async (event) => {
+      event.preventDefault();
+      const button = event.currentTarget;
+      const subscriptionUrl = "https://cdnsync.fedya-sbp.ru/happ.txt";
+      try {
+        await copyText(subscriptionUrl);
+        button.textContent = "Ссылка подписки скопирована в буфер";
+      } catch (_) {
+        button.textContent = "Не удалось скопировать — открой страницу в Safari";
+      }
+    });
+
+    document.getElementById("routing-copy").addEventListener("click", async (event) => {
+      event.preventDefault();
+      const button = event.currentTarget;
+      const routingRules = "happ://routing/onadd/eyJOYW1lIjoiQmxhY2tUdW5uZWwgUlUgRGlyZWN0IiwiR2xvYmFsUHJveHkiOiJ0cnVlIiwiUmVtb3RlRG5zIjoiOC44LjguOCIsIkRvbWVzdGljRG5zIjoiNzcuODguOC44IiwiUmVtb3RlRE5TVHlwZSI6IkRvSCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOi8vOC44LjguOC9kbnMtcXVlcnkiLCJSZW1vdGVETlNJUCI6IjguOC44LjgiLCJEb21lc3RpY0ROU1R5cGUiOiJEb0giLCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOi8vNzcuODguOC44L2Rucy1xdWVyeSIsIkRvbWVzdGljRE5TSVAiOiI3Ny44OC44LjgiLCJHZW9pcHVybCI6Imh0dHBzOi8vZ2l0aHViLmNvbS9Mb3lhbHNvbGRpZXIvZ2VvaXAvcmVsZWFzZXMvbGF0ZXN0L2Rvd25sb2FkL2dlb2lwLmRhdCIsIkdlb3NpdGV1cmwiOiJodHRwczovL2dpdGh1Yi5jb20vTG95YWxzb2xkaWVyL3YycmF5LXJ1bGVzLWRhdGEvcmVsZWFzZXMvbGF0ZXN0L2Rvd25sb2FkL2dlb3NpdGUuZGF0IiwiTGFzdFVwZGF0ZWQiOiIxNzg5MTA5OTM4IiwiRGlyZWN0U2l0ZXMiOlsiZ2Vvc2l0ZTpwcml2YXRlIiwiZ2Vvc2l0ZTpjYXRlZ29yeS1ydSJdLCJEaXJlY3RJcCI6WyJnZW9pcDpwcml2YXRlIiwiZ2VvaXA6cnUiXSwiUHJveHlTaXRlcyI6W10sIlByb3h5SXAiOltdLCJCbG9ja1NpdGVzIjpbXSwiQmxvY2tJcCI6W10sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiRmFrZUROUyI6ImZhbHNlIn0=";
+      try {
+        await copyText(routingRules);
+        button.textContent = "Правила роутинга скопированы в буфер";
+      } catch (_) {
+        button.textContent = "Не удалось скопировать — откройте страницу в Safari";
+      }
+    });
+  </script>
+</body>
+</html>
