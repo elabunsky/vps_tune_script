@@ -157,6 +157,52 @@ else
     echo "conntrack недоступен"
 fi
 
+### FILE DESCRIPTORS / NGINX ##########################################
+hdr "FILE DESCRIPTORS / NGINX"
+if [ -r /proc/sys/fs/file-nr ]; then
+    read -r fd_alloc fd_unused fd_max < /proc/sys/fs/file-nr
+    printf 'system  : %s allocated - %s unused / %s max | nr_open=%s\n' \
+        "$fd_alloc" "$fd_unused" "$fd_max" "$(cat /proc/sys/fs/nr_open)"
+fi
+printf 'shell   : soft=%s hard=%s (не лимиты nginx / not nginx limits)\n' "$(ulimit -Sn)" "$(ulimit -Hn)"
+if command -v systemctl >/dev/null 2>&1 && \
+        [ -n "$(systemctl show nginx.service -p FragmentPath --value 2>/dev/null)" ]; then
+    nginx_soft=$(systemctl show nginx.service -p LimitNOFILESoft --value 2>/dev/null)
+    nginx_hard=$(systemctl show nginx.service -p LimitNOFILE --value 2>/dev/null)
+    printf 'systemd : nginx.service soft=%s hard=%s (при следующем старте / next start)\n' \
+        "$nginx_soft" "$nginx_hard"
+fi
+# Read /proc rather than running nginx -T: unprivileged users may lack access
+# to TLS keys/logs, and a health report should never create nginx files.
+nginx_pids=$(pgrep -x nginx 2>/dev/null || true)
+if [ -z "$nginx_pids" ]; then
+    echo 'nginx   : нет процессов / no running processes'
+else
+    for nginx_pid in $nginx_pids; do
+        nginx_args=$(ps -p "$nginx_pid" -o args= 2>/dev/null)
+        case "$nginx_args" in
+            *'master process'*) nginx_role=master ;;
+            *'worker process is shutting down'*) nginx_role=draining ;;
+            *'worker process'*) nginx_role=worker ;;
+            *) nginx_role=helper ;;
+        esac
+        if [ ! -r "/proc/$nginx_pid/limits" ]; then
+            printf 'PID %-6s %-8s: limits недоступны / unavailable (sudo ./stat.sh)\n' \
+                "$nginx_pid" "$nginx_role"
+            continue
+        fi
+        nginx_limits=$(awk '/^Max open files/ {printf "soft=%s hard=%s", $4, $5}' \
+            "/proc/$nginx_pid/limits" 2>/dev/null)
+        if nginx_fds=$(ls -U "/proc/$nginx_pid/fd" 2>/dev/null); then
+            nginx_fd_count=$(printf '%s\n' "$nginx_fds" | awk 'NF {n++} END {print n+0}')
+        else
+            nginx_fd_count='n/a (sudo)'
+        fi
+        printf 'PID %-6s %-8s: %s | open FDs=%s\n' \
+            "$nginx_pid" "$nginx_role" "${nginx_limits:-n/a}" "$nginx_fd_count"
+    done
+fi
+
 ### TOP PROCESSES #####################################################
 hdr "TOP PROCESSES (CPU)"
 ps -eo pcpu,pmem,rss,time,comm --sort=-pcpu 2>/dev/null | head -8 | \
