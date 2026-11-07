@@ -5,7 +5,7 @@
 # Applies the full set of settings that keep a low-RAM VPN / Telegram-bot box
 # healthy. Learned the hard way on a real server (1 GB RAM, xray/x-ui, bots):
 #
-#   1. Swap / zram behaviour     — swappiness=0, page-cluster=0
+#   1. Swap / zram behaviour     — swappiness=60, page-cluster=0, watermark-scale=150
 #   2. conntrack capacity        — bigger table, sane timeout, bigger hash
 #                                  (prevents "nf_conntrack: table full,
 #                                  dropping packet" -> SSH/VPN connection freezes)
@@ -33,18 +33,19 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # Config (numbers proven for a ~1 GB RAM production box)
 # -----------------------------------------------------------------------------
-SWAPPINESS=0                      # minimize swapping; preserve existing zram
+SWAPPINESS=60                     # moscow: allow reclaim before RAM is exhausted
 PAGE_CLUSTER=0                    # swap one page at a time (best for zram)
-ZRAM_SIZE_MB=900                  # zram disksize in MiB (same as the fn box)
-                                  # only created when no zram/swap exists
+WATERMARK_SCALE_FACTOR=150        # moscow: earlier background reclaim (1.5%)
+ZRAM_SIZE_MB=1536                 # moscow: logical zram capacity in MiB
+                                  # only created when zram0 is absent
 
-CONNTRACK_MAX=65536               # conntrack table slots
-CONNTRACK_HASHSIZE=16384          # = MAX / 4 (avg hash chain length)
+CONNTRACK_MAX=131072              # conntrack table slots
+CONNTRACK_HASHSIZE=32768          # = MAX / 4 (avg hash chain length)
 CONNTRACK_EST_TIMEOUT=86400       # established-entry timeout, seconds (1 day)
 
 # --- TCP stack ---------------------------------------------------------------
-# Values proven on the production box (fn): 16 MB buffers + BBR/fq (hwdsl2 VPN
-# script heritage) — long VPN tunnels stall on smaller caps.
+# Values checked against moscow: 16 MiB caps + BBR/fq.
+# Buffer caps are ceilings, not memory reserved for each connection.
 TCP_FIN_TIMEOUT=20                # timeout for orphaned FIN_WAIT_2 sockets
 TCP_TW_REUSE=1                    # reuse sockets in TIME_WAIT for new conns
 TCP_MAX_SYN_BACKLOG=8192          # room for pending SYN requests (conn bursts)
@@ -557,24 +558,35 @@ UNIT
     fi
 fi
 
-if swapon --show 2>/dev/null | grep -q .; then
+# -- Swap policy (also exercised independently by tests) -------------------------
+if [[ -n "$(swapon --show=NAME --noheadings 2>/dev/null)" ]]; then
     if [[ "$DRY_RUN" -eq 0 ]]; then
+        SWAP_TMP=$(mktemp "$SYSCTL_D/.vps-tune-swap.XXXXXX")
+        # Preserve unrelated settings; replace all managed keys, including
+        # whitespace variants, and add keys missing from an existing file.
+        if [[ -f "$SWAP_CONF" ]]; then
+            sed -E '/^[[:space:]]*vm\.(swappiness|page-cluster|watermark_scale_factor)[[:space:]]*=/d' "$SWAP_CONF" > "$SWAP_TMP"
+        fi
         {
-            echo "# swap/zram tuning"
-            grep -q "^vm.swappiness=" "$SWAP_CONF" 2>/dev/null || echo "vm.swappiness=$SWAPPINESS"
-            grep -q "^vm.page-cluster=" "$SWAP_CONF" 2>/dev/null || echo "vm.page-cluster=$PAGE_CLUSTER"
-        } > /tmp/swap.conf.new
-    fi
-    if [[ -f "$SWAP_CONF" ]]; then
-        c sed -i "s|^vm.swappiness=.*|vm.swappiness=$SWAPPINESS|; s|^vm.page-cluster=.*|vm.page-cluster=$PAGE_CLUSTER|" "$SWAP_CONF"
-        c rm -f /tmp/swap.conf.new
+            echo "vm.swappiness=$SWAPPINESS"
+            echo "vm.page-cluster=$PAGE_CLUSTER"
+            echo "vm.watermark_scale_factor=$WATERMARK_SCALE_FACTOR"
+        } >> "$SWAP_TMP"
+        chmod 644 "$SWAP_TMP"
+        if cmp -s "$SWAP_TMP" "$SWAP_CONF"; then
+            rm -f "$SWAP_TMP"
+        else
+            mv -f "$SWAP_TMP" "$SWAP_CONF"
+        fi
     else
-        c mv /tmp/swap.conf.new "$SWAP_CONF"
+        echo "    DRY-RUN  : would persist swap policy in $SWAP_CONF"
     fi
-    c sysctl -w "vm.swappiness=$SWAPPINESS" "vm.page-cluster=$PAGE_CLUSTER"
+    c sysctl -w "vm.swappiness=$SWAPPINESS" "vm.page-cluster=$PAGE_CLUSTER" \
+                "vm.watermark_scale_factor=$WATERMARK_SCALE_FACTOR"
 else
     skip "no swap device — swap part skipped (conntrack/TCP/sniffing still apply)"
 fi
+# -- End swap policy ------------------------------------------------------------
 
 # -----------------------------------------------------------------------------
 info "2. conntrack: capacity + timeout"
@@ -939,7 +951,7 @@ info "8. Verification"
 # -----------------------------------------------------------------------------
 [[ "$DRY_RUN" -eq 1 ]] && { echo; echo "Dry-run finished — nothing was changed."; exit 0; }
 
-sysctl vm.swappiness vm.page-cluster \
+sysctl vm.swappiness vm.page-cluster vm.watermark_scale_factor \
        net.netfilter.nf_conntrack_max \
        net.netfilter.nf_conntrack_tcp_timeout_established \
        net.ipv4.tcp_fin_timeout net.ipv4.tcp_keepalive_time \

@@ -1,5 +1,23 @@
 # vps_tune_script
 
+## Сначала настройте свой домен для SNI и HTTPS
+
+**Для описанной здесь схемы крайне рекомендуется настроить собственный домен, который указывает на тот же IP, что и VPN-сервер**, и работающий HTTPS-сайт на Nginx. Например, `vpn.example.com` → публичный IPv4 вашего VPS. Если публикуете AAAA, IPv6 тоже должен вести на этот сервер и обслуживаться им. Это даёт контроль над DNS, сертификатом и сайтом, используемым как TLS-цель; не гарантирует обход блокировок. Собственный домен — рекомендация для этой схемы, а не обязательное требование протокола REALITY.
+
+Общая схема настройки:
+
+1. Создайте DNS-запись A на IP VPS, без CDN-проксирования для прямого подключения REALITY. Выпустите сертификат на этот домен и настройте автоматическое продление. Для HTTP-01 обеспечьте доступность challenge на порту 80; при другой схеме используйте DNS-01.
+2. Настройте HTTPS-виртуальный хост Nginx с `server_name vpn.example.com`, сертификатом для этого имени, TLS 1.2/1.3 и обычной страницей. В схеме ниже сайт слушает **`127.0.0.1:8443`**, поддерживает TLS 1.3 и HTTP/2. Внутренние порты не нужно открывать наружу.
+3. Если Nginx принимает общий публичный `:443`, включите модуль `stream` с `ssl_preread`. В `stream {}` задайте `map $ssl_preread_server_name`: `vpn.example.com` → локальный inbound Xray, например `127.0.0.1:1448`, а `default` → локальный HTTPS-сайт `127.0.0.1:8443`. В stream-сервере используются `listen 443`, `ssl_preread on` и `proxy_pass` на результат map. Здесь TLS проходит насквозь до Xray; сертификат сайта настраивается в HTTP-сервере Nginx. Один и тот же адрес `:443` не должен одновременно слушаться Xray и HTTP-сервером Nginx.
+4. В REALITY inbound укажите `serverNames: ["vpn.example.com"]`, а `target: "127.0.0.1:8443"` (в старых конфигурациях — `dest`). В клиенте SNI / `serverName` — тот же домен; адрес подключения — домен или IP этого VPS. Неавторизованный TLS-трафик Xray направит на локальный сайт. **Не задавайте target как `vpn.example.com:443`**, если домен ведёт на этот же вход Nginx: получится петля Nginx → Xray → Nginx. Для XHTTP также согласуйте path и Host клиента с inbound.
+5. Проверьте DNS, `nginx -t`, конфиг Xray и HTTPS из внешней сети (`curl -I https://vpn.example.com`), затем подключение VPN. Локальный сайт можно проверить через `curl --resolve vpn.example.com:8443:127.0.0.1 https://vpn.example.com:8443/`. Reload Nginx выполняйте после успешной проверки; отдельно проверяйте продление сертификата.
+
+Схема: **клиент → Nginx stream :443 → Xray REALITY 127.0.0.1:1448 → локальный HTTPS-сайт 127.0.0.1:8443 для обычных TLS-запросов**. Авторизованный VPN-трафик обрабатывается Xray. SNI-маршрутизация различает имена, а не браузер и VPN с одинаковым именем.
+
+На `moscow` при проверке 7 ноября 2026 года собственный домен уже указывал на IP VPS, а его SNI направлялся Nginx в локальный Xray на `1448`. Это пример устройства сервера, не готовый конфиг для копирования. `tune.sh` настраивает лимиты Nginx, но не создаёт домен, сертификат, stream-map или REALITY inbound — их нужно настроить отдельно.
+
+Документация: [Nginx ssl_preread](https://nginx.org/en/docs/stream/ngx_stream_ssl_preread_module.html), [Xray REALITY](https://xtls.github.io/en/config/transports/reality.html).
+
 Набор скриптов и настроек для небольшого Linux VPS (VPN-сервер / тг-боты на ~1 ГБ RAM), который устраняет типовые симптомы деградации:
 
 1. **Фризы, «зависание» SSH** — при переполнении conntrack-таблицы ядро начинает дропать пакеты новых соединений.
@@ -15,18 +33,22 @@
 ## Что настраивает
 
 ### 1. Своп / zram
-Скрипт проверяет наличие `/dev/zram0`: если его нет — устанавливает пакет модулей ядра (`linux-modules-extra`, при необходимости), создаёт zram-устройство **900 МБ, lz4, приоритет 100** (как на эталонном сервере) и сохраняет автозапуск через systemd-юнит `zram-setup.service`. Если zram уже есть — только тюнит поведение.
+Скрипт проверяет наличие `/dev/zram0`: если его нет — устанавливает пакет модулей ядра (`linux-modules-extra`, при необходимости), создаёт zram-устройство **1536 МиБ, lz4, приоритет 100** (как на `moscow`) и сохраняет автозапуск через systemd-юнит `zram-setup.service`. Если zram уже есть — только тюнит поведение.
 
 | Параметр | Значение | Зачем |
 |---|---|---|
-| `vm.swappiness` | `0` | Минимизировать выгрузку в swap; существующий zram сохраняется, zswap не включается |
+| `vm.swappiness` | `60` | Как на `moscow`: разрешить своевременное вытеснение в swap/zram при нехватке RAM |
 | `vm.page-cluster` | `0` | Вытеснять страницы по одной — правильное поведение для zram |
+
+`vm.watermark_scale_factor=150` также перенесён с `moscow`: увеличивает запас для фонового освобождения памяти (единицы — 1/10000, то есть 1,5%). `swappiness=0` откладывает swap до сильного дефицита памяти; для VPS с 1 ГБ это может приводить к задержкам освобождения памяти. Значение `60` — текущий рабочий вариант сервера, не универсальный оптимум. [Описание параметров ядра](https://docs.kernel.org/admin-guide/sysctl/vm.html#swappiness).
+
+На `moscow` 7 ноября 2026 года: 956 МиБ RAM, zram 1536 МиБ с приоритетом 100 и резервный `/swapfile` 512 МиБ с приоритетом 10; `page-cluster=0`, `watermark_scale_factor=150`. Эти VM-параметры также заданы в профиле TuneD `vpn-zram`: при ручной настройке учитывайте его, иначе он может вернуть свои значения. Скрипт не редактирует профили TuneD, не создаёт резервный swap-файл и не меняет размер существующего zram. Логический размер zram не равен занятой физической RAM. Остальные сетевые значения проверены по серверу; его повышенные лимиты Nginx/systemd сохраняются. Настройки DNS зависят от окружения: на `moscow` отдельный dnsmasq слушает `127.0.0.2`; полный запуск скрипта использует свою схему системного resolver, а не копирует её с сервера. Проверка сервера выполнялась только на чтение.
 
 ### 2. Conntrack
 | Параметр | Значение | Зачем |
 |---|---|---|
-| `nf_conntrack_max` | `65536` | Вместо дефолтных 8192 — иначе таблица переполняется и ядро дропает пакеты новых соединений |
-| hashsize | `16384` | Размер хэш-таблицы (`max / 4`), переживает ребут через `modprobe.d`; большее текущее значение сохраняется |
+| `nf_conntrack_max` | `131072` | Как на `moscow`: запас ёмкости таблицы; при её переполнении ядро дропает пакеты новых соединений |
+| hashsize | `32768` | Размер хэш-таблицы (`max / 4`), переживает ребут через `modprobe.d`; большее текущее значение сохраняется |
 | `nf_conntrack_tcp_timeout_established` | `86400` | Записи «мертвых» TCP-сессий живут сутки, а не 5 дней — меньше мусора в таблице |
 
 Более высокий текущий `nf_conntrack_max` и более короткий established timeout сохраняются и в runtime, и в файле для следующей загрузки.
@@ -145,6 +167,18 @@ python3 -m unittest discover -s tests -v           # тесты без root и �
 
 # vps_tune_script
 
+## First, configure your own SNI domain and HTTPS site
+
+**For this deployment, configuring your own domain pointing to the same public IP as the VPN server is strongly recommended.** Set its A record to the VPS IPv4; publish AAAA only if IPv6 reaches the same service. Use direct DNS without CDN proxying for this REALITY topology. Your own domain gives you control over DNS, certificates and the TLS target; it is a deployment recommendation, not a REALITY requirement or a guarantee against blocking.
+
+Create a real HTTPS site in Nginx with a valid, automatically renewed certificate, matching `server_name`, TLS 1.3 and HTTP/2, listening on `127.0.0.1:8443`. Expose the certificate challenge on port 80 for HTTP-01, or use DNS-01. If Nginx owns public `:443`, enable `stream` / `ssl_preread` and map the domain to a local Xray inbound such as `127.0.0.1:1448`; send unknown SNI to the local HTTPS site. The stream listener passes TLS through rather than terminating it. Keep backend ports local and avoid competing listeners on public `:443`.
+
+Set REALITY `serverNames` to your domain and `target` (formerly `dest`) to `127.0.0.1:8443`. Use the same client SNI / `serverName`; the connection address can be the domain or the VPS IP. Ordinary unauthenticated TLS connections reach the local site through Xray. **Do not target your domain's public port 443 when it routes back to the same Xray inbound: this creates a loop.** With XHTTP, also match the client's path and Host to the inbound.
+
+Validate DNS, `nginx -t`, the Xray configuration, external HTTPS and a VPN connection before applying changes. Test certificate renewal separately. `tune.sh` only tunes Nginx limits; DNS, certificates, stream routing and REALITY inbounds must be configured separately. SNI routing distinguishes names, not browser and VPN traffic sharing the same name.
+
+References: [Nginx ssl_preread](https://nginx.org/en/docs/stream/ngx_stream_ssl_preread_module.html), [Xray REALITY](https://xtls.github.io/en/config/transports/reality.html).
+
 A set of scripts and settings for a small Linux VPS (VPN server / Telegram bots on ~1 GB RAM) that fixes typical degradation symptoms:
 
 1. **Freezes / SSH «hangs»** — when the kernel conntrack table overflows, the kernel starts dropping packets of new connections.
@@ -160,18 +194,22 @@ Requires Linux with systemd, primarily Debian/Ubuntu. The Nginx section needs ro
 ## What it configures
 
 ### 1. Swap / zram
-The script checks whether `/dev/zram0` exists: if not, it installs the kernel modules package (`linux-modules-extra`, when needed), creates a **900 MB, lz4, priority 100** zram device (matching the reference server) and persists auto-start via the `zram-setup.service` systemd unit. If zram already exists, it only tunes the behaviour.
+The script checks whether `/dev/zram0` exists: if not, it installs the kernel modules package (`linux-modules-extra`, when needed), creates a **1536 MiB, lz4, priority 100** zram device (matching `moscow`) and persists auto-start via the `zram-setup.service` systemd unit. If zram already exists, it only tunes the behaviour.
 
 | Parameter | Value | Why |
 |---|---|---|
-| `vm.swappiness` | `0` | Minimize swapping; preserve existing zram and do not enable zswap |
+| `vm.swappiness` | `60` | Match `moscow`: allow timely swap/zram reclaim under memory pressure |
 | `vm.page-cluster` | `0` | Swap pages one at a time — the correct behaviour for zram |
+
+`vm.watermark_scale_factor=150` also matches `moscow` and gives background reclaim more headroom (units are 1/10000, i.e. 1.5%). `swappiness=0` delays swapping until severe memory pressure; `60` is the server's current working setting, not a universal optimum. See the [kernel documentation](https://docs.kernel.org/admin-guide/sysctl/vm.html#swappiness).
+
+Read-only audit on 7 November 2026: `moscow` has 956 MiB RAM, 1536 MiB zram at priority 100 and a 512 MiB disk swap reserve at priority 10. Its TuneD `vpn-zram` profile also sets these VM values; keep TuneD consistent when editing them manually. The script does not edit TuneD profiles, create disk swap or resize existing zram. Logical zram capacity is not physical RAM usage. Higher existing Nginx/systemd limits are preserved. DNS remains environment-specific: the server uses a separate dnsmasq on `127.0.0.2`; a full script run uses the script's own system-resolver setup rather than cloning that topology. No server settings were changed during the audit.
 
 ### 2. Conntrack
 | Parameter | Value | Why |
 |---|---|---|
-| `nf_conntrack_max` | `65536` | Instead of the default 8192 — otherwise the table overflows and the kernel drops packets of new connections |
-| hashsize | `16384` | Hash table size (`max / 4`), survives reboot via `modprobe.d`; preserves a higher current value |
+| `nf_conntrack_max` | `131072` | Match `moscow`: table capacity headroom; overflow drops packets for new connections |
+| hashsize | `32768` | Hash table size (`max / 4`), survives reboot via `modprobe.d`; preserves a higher current value |
 | `nf_conntrack_tcp_timeout_established` | `86400` | Dead TCP session records live one day instead of five — less garbage in the table |
 
 A higher current `nf_conntrack_max` and a shorter established timeout are preserved both at runtime and in the persistent file.
